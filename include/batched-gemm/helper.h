@@ -118,7 +118,7 @@ __global__ void InitializeMatrix_kernel(
 
   int i = threadIdx.x + blockIdx.x * blockDim.x;
   int j = threadIdx.y + blockIdx.y * blockDim.y;
-  int k = threadIdx.z + blockIdx.z * blockDim.z;
+  int k = blockIdx.z;
 
   if (k < batch && j < rows && i < columns) {
     int offset = k * rows * columns + j * columns + i;
@@ -126,8 +126,9 @@ __global__ void InitializeMatrix_kernel(
     // // Generate arbitrary elements.
     // int const k = 16807;
     // int const m = 16;
-    // float value = float(((offset + seed) * k % m) - m / 2);
-    float value = float(offset+seed);
+    
+    float value = float(((offset + seed) * k % j) - j / 2);
+    // float value = float(offset+seed);
     matrix[offset] = value;
   }
 }
@@ -135,11 +136,11 @@ __global__ void InitializeMatrix_kernel(
 /// Simple function to initialize a matrix to arbitrary small integers.
 cudaError_t InitializeMatrix(float *matrix, int batch, int rows, int columns, int seed = 0) {
 
-  dim3 block(16, 16, 16);
+  dim3 block(16, 16, 1);
   dim3 grid(
-    (batch + block.x - 1) / block.x,
+    (columns + block.x - 1) / block.x,
     (rows + block.y - 1) / block.y,
-    (columns + block.z - 1) / block.z
+    batch
   );
 
   InitializeMatrix_kernel<<< grid, block >>>(matrix, batch, rows, columns, seed);
