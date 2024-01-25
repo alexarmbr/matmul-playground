@@ -71,6 +71,10 @@ if (returnedResults == 0) {
 checkCublasStatus(CUBLAS_STATUS_NOT_SUPPORTED);
 }
 
+for (int i = 0; i < num_trials; i++)
+{
+GpuTimer timer;
+timer.start();
 checkCublasStatus(cublasLtMatmul(ltHandle,
                             operationDesc,
                             &alpha,
@@ -87,7 +91,9 @@ checkCublasStatus(cublasLtMatmul(ltHandle,
                             workspace,
                             workspaceSize,
                             0));
-
+timer.stop();
+std::cout << "elapsed ms: " << timer.elapsed_millis() << std::endl;
+}
 // descriptors are no longer needed as all GPU work was already enqueued
 if (preference) checkCublasStatus(cublasLtMatmulPreferenceDestroy(preference));
 if (Cdesc) checkCublasStatus(cublasLtMatrixLayoutDestroy(Cdesc));
@@ -101,9 +107,9 @@ if (operationDesc) checkCublasStatus(cublasLtMatmulDescDestroy(operationDesc));
 
 int main(int argc, char* argv[]) {
     // accept M, N, K, batch
-    int M = 128;
-    int N = 128;
-    int K = 64;
+    int M = 1024;
+    int N = 2048;
+    int K = 512;
     int batch = 1;
     if (argc == 5) {
         M = atoi(argv[1]);
@@ -125,7 +131,7 @@ int main(int argc, char* argv[]) {
     CUDA_CHECK(AllocateMatrix(&B_device, batch, K, N));
     CUDA_CHECK(AllocateMatrix(&C_device, batch, M, N));
 
-    LtSgemm(M, N, K, A_device, B_device, C_device, 1);
+    LtSgemm(M, N, K, A_device, B_device, C_device, 10);
 
     CUDA_CHECK(cudaMemcpy(A_host, A_device, sizeof(float) * M * K * batch, cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(B_host, B_device, sizeof(float) * K * N * batch, cudaMemcpyDeviceToHost));
@@ -139,7 +145,7 @@ int main(int argc, char* argv[]) {
                 for (int k = 0; k < K; k++)
                 {
                     // column major
-                    C_host_ref[j * M + i] += A_host[k * M + k] * B_host[i * K + j];
+                    C_host_ref[j * M + i] += A_host[k * M + i] * B_host[j * K + k];
                 }
             }
         }
