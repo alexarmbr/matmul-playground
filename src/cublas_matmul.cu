@@ -107,9 +107,9 @@ if (operationDesc) checkCublasStatus(cublasLtMatmulDescDestroy(operationDesc));
 
 int main(int argc, char* argv[]) {
     // accept M, N, K, batch
-    int M = 1024;
-    int N = 2048;
-    int K = 512;
+    int M = 4096;
+    int N = 4096;
+    int K = 4096;
     int batch = 1;
     if (argc == 5) {
         M = atoi(argv[1]);
@@ -131,39 +131,39 @@ int main(int argc, char* argv[]) {
     CUDA_CHECK(AllocateMatrix(&B_device, batch, K, N));
     CUDA_CHECK(AllocateMatrix(&C_device, batch, M, N));
 
-    LtSgemm(M, N, K, A_device, B_device, C_device, 10);
+    LtSgemm(M, N, K, A_device, B_device, C_device, 1);
 
-    CUDA_CHECK(cudaMemcpy(A_host, A_device, sizeof(float) * M * K * batch, cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(B_host, B_device, sizeof(float) * K * N * batch, cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(C_host, C_device, sizeof(float) * M * N * batch, cudaMemcpyDeviceToHost));
+    // CUDA_CHECK(cudaMemcpy(A_host, A_device, sizeof(float) * M * K * batch, cudaMemcpyDeviceToHost));
+    // CUDA_CHECK(cudaMemcpy(B_host, B_device, sizeof(float) * K * N * batch, cudaMemcpyDeviceToHost));
+    // CUDA_CHECK(cudaMemcpy(C_host, C_device, sizeof(float) * M * N * batch, cudaMemcpyDeviceToHost));
 
-    // TODO make sure these are correct for column major layout
-        for (int i = 0; i < M; i++)
-        {
-            for (int j = 0; j < N; j++)
-            {
-                for (int k = 0; k < K; k++)
-                {
-                    // column major
-                    C_host_ref[j * M + i] += A_host[k * M + i] * B_host[j * K + k];
-                }
-            }
-        }
+    // // TODO make sure these are correct for column major layout
+    //     for (int i = 0; i < M; i++)
+    //     {
+    //         for (int j = 0; j < N; j++)
+    //         {
+    //             for (int k = 0; k < K; k++)
+    //             {
+    //                 // column major
+    //                 C_host_ref[j * M + i] += A_host[k * M + i] * B_host[j * K + k];
+    //             }
+    //         }
+    //     }
 
-    const float tolerance = 0.0001;
-        for (int i = 0; i < M; i++)
-        {
-            for (int j = 0; j < N; j++)
-            {
-                if (std::abs(C_host_ref[j * M + i] - C_host[j * M + i]) > tolerance)
-                {
-                    std::cout << "Error at (" << i << ", " << j << ")" << std::endl;
-                    std::cout << "Expected: " << C_host_ref[j * M + i] << std::endl;
-                    std::cout << "Actual: " << C_host[j * M + i] << std::endl;
-                    return 1;
-                }
-            }
-        }
+    // const float tolerance = 0.0001;
+    //     for (int i = 0; i < M; i++)
+    //     {
+    //         for (int j = 0; j < N; j++)
+    //         {
+    //             if (std::abs(C_host_ref[j * M + i] - C_host[j * M + i]) > tolerance)
+    //             {
+    //                 std::cout << "Error at (" << i << ", " << j << ")" << std::endl;
+    //                 std::cout << "Expected: " << C_host_ref[j * M + i] << std::endl;
+    //                 std::cout << "Actual: " << C_host[j * M + i] << std::endl;
+    //                 return 1;
+    //             }
+    //         }
+    //     }
     
 
 

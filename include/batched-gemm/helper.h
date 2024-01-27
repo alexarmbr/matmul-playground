@@ -107,50 +107,28 @@ struct GpuTimer
     }
 };
 
-
-/// Kernel to initialize a matrix with small integers.
-__global__ void InitializeMatrix_kernel(
-  float *matrix,
-  int batch,
-  int rows,
-  int columns,
-  int seed = 0) {
-
-  int i = threadIdx.x + blockIdx.x * blockDim.x;
-  int j = threadIdx.y + blockIdx.y * blockDim.y;
-  int k = blockIdx.z;
-
-  if (k < batch && j < rows && i < columns) {
-    int offset = k * rows * columns + j * columns + i;
-
-    // // Generate arbitrary elements.
-    // int const k = 16807;
-    // int const m = 16;
-    
-    float value = float(((offset + seed) * k % j) - j / 2);
-    // float value = float(offset+seed);
-    matrix[offset] = value;
-  }
-}
-
 /// Simple function to initialize a matrix to arbitrary small integers.
-cudaError_t InitializeMatrix(float *matrix, int batch, int rows, int columns, int seed = 0) {
+void InitializeMatrix(float *matrix, int batch, int rows, int columns, int seed = 0) {
 
-  dim3 block(16, 16, 1);
-  dim3 grid(
-    (columns + block.x - 1) / block.x,
-    (rows + block.y - 1) / block.y,
-    batch
-  );
+  const float u = 10.0f;
+  const float l = -10.0f;
+  for (int b = 0; b < batch; b++)
+  {
+    for (int r = 0; r < rows; r++)
+    {
+      for (int c = 0; c < columns; c++)
+      {
+        // generate a random float value between bounds a and b using the formula a + (b-a)*rand()/RAND_MAX
+        unsigned int offset = b * rows * columns + r * columns + c;
+        float value = l + (u-l)*rand()/RAND_MAX;
+        matrix[offset] = value;
+      }
+    }
+  }
 
-  InitializeMatrix_kernel<<< grid, block >>>(matrix, batch, rows, columns, seed);
-
-  return cudaGetLastError();
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-/// Allocates device memory for a matrix then fills with arbitrary small integers.
+/// Allocates device memory for a matrix then fills with arbitrary small integers
 cudaError_t AllocateMatrix(float **matrix, int batch, int rows, int columns, int seed = 0) {
   cudaError_t result;
 
@@ -175,13 +153,16 @@ cudaError_t AllocateMatrix(float **matrix, int batch, int rows, int columns, int
   }
 
   // Initialize matrix elements to arbitrary small integers.
-  result = InitializeMatrix(*matrix, batch, rows, columns, seed);
-
-  if (result != cudaSuccess) {
-    std::cerr << "Failed to initialize matrix: "
+  float* host_matrix = new float[rows * columns * batch];
+  InitializeMatrix(host_matrix, batch, rows, columns, seed);
+  result = cudaMemcpy(*matrix, host_matrix, sizeof_matrix, cudaMemcpyHostToDevice);
+    if (result != cudaSuccess) {
+    std::cerr << "Failed to copy host matrix to device: "
       << cudaGetErrorString(result) << std::endl;
     return result;
   }
-
-  return result;
+  delete [] host_matrix;
+  
+  
+  return cudaSuccess;
 }
