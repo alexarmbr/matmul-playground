@@ -46,14 +46,12 @@ __global__ void matmul_kernel_naive(int M, int N, int K, float* A, float* B, flo
 __global__ void matmul_kernel_shmem(int M, int N, int K, float* A, float* B, float* C) {
     __shared__ float tile_a [D*D];
     __shared__ float tile_b [D*D];
-    // __shared__ float tile_c [D*D];
 
     const unsigned int A_row = blockDim.y * blockIdx.y + threadIdx.y;
     const unsigned int B_col = blockDim.x * blockIdx.x + threadIdx.x;
     const unsigned int num_tiles = (K + D - 1) / D;
     const unsigned int tile_idx_flat = threadIdx.y * D + threadIdx.x;
     float local_sum = 0.0f;
-    // tile_c[tile_idx_flat] = 0.0f;
 
     for (int k = 0; k < num_tiles; k++)
     {
@@ -65,16 +63,11 @@ __global__ void matmul_kernel_shmem(int M, int N, int K, float* A, float* B, flo
         __syncthreads();
 
         // perform matmul from tile_a and tile_b into tile_c and sync
-        // tile_c[tile_idx_flat] = 0.0f;
         for (int tile_k = 0; tile_k < D; tile_k++)
         {
             local_sum += tile_a[threadIdx.y * D + tile_k] * tile_b[tile_k * D + threadIdx.x];
-            // tile_c[tile_idx_flat] += tile_a[threadIdx.y * D + tile_k] * tile_b[tile_k * D + threadIdx.x];
         }
         __syncthreads();
-
-        // accumulate result
-        // local_sum += tile_c[tile_idx_flat];
     }
     C[A_row * N + B_col] = local_sum;
 
