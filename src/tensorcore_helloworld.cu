@@ -9,9 +9,6 @@
 #define N 1024
 #define K 512
 
-// this should be num SMs
-// #define NUM_BLOCKS 4
-
 // 8 tiles per block
 #define M_TILES_PER_BLOCK 2
 #define N_TILES_PER_BLOCK 4
@@ -19,30 +16,47 @@
 // 16 by 16 tiles
 #define TILE_DIM 16
 
-// how many tiles do we need to cover the M x N matrix?
-#define M_NUM_TILES M / (M_TILES_PER_BLOCK * TILE_DIM)
-#define N_NUM_TILES N / (N_TILES_PER_BLOCK * TILE_DIM)
-
 #define WARP_SIZE 32
 
 // D = alpha * A * B + beta * C
 __global__ void sgemm(half* A, half* B, half* C, half* D, float alpha, float beta)
 {
+  const unsigned int laneIdx = threadIdx.x % WARP_SIZE;
   const unsigned int warpIdx = threadIdx.x / WARP_SIZE;
   const unsigned int warpsPerBlock = blockDim.x / WARP_SIZE; // WARP_SIZE should divide blockDim.x
   const unsigned int warpRowIdx = (threadIdx.y + blockIdx.y * blockDim.y) * TILE_DIM; // y threads are spaced out TILE_DIM units
   const unsigned int warpColIdx = (blockIdx.x * warpsPerBlock + warpIdx) * TILE_DIM; // 1 warp, 32 threads with consecutive threadIdx.x
+  
   // compute a 16x16 tile of C
+  // TODO are right flags being passed to nvcc to make sure debug symbols are generated for
+  // device code?
+
+
+  const unsigned int tileCol = threadIdx.x % TILE_DIM;
+  const unsigned int tileRow = laneIdx / TILE_DIM;
+  unsigned int i = (warpRowIdx + tileRow) * M + (warpColIdx + tileCol);
+  const half eps = 0.1;
+  for (int step = 0; step < TILE_DIM / (WARP_SIZE / TILE_DIM); step++)
+  {
+    D[i] = C[i] + eps;
+    i+=M;
+  }
  
 }
 
 
 int main(int argc, char **argv) {
+  std::cout << "hellooo" << std::endl;
 
     bool check_on_cpu = true;
 
     // setup
-    half A[M * K], B[K * N], C[M * N], D[M * N];
+
+    half *A, *B, *C, *D;
+    A = (half *)malloc(M * K * sizeof(half));
+    B = (half *)malloc(K * N * sizeof(half));
+    C = (half *)malloc(M * N * sizeof(half));
+    D = (half *)malloc(M * N * sizeof(half));
     half alpha = 0.3;
     half beta = 0.7;
 
@@ -71,35 +85,33 @@ int main(int argc, char **argv) {
 
     // launch kernel here
     // TODO double check this
-    const unsigned int tileRowsPerBlock = 2;
-    const unsigned int tileColsPerBlock = 4;
-    const unsigned int yBlocks = N / (tileRowsPerBlock * TILE_DIM);
-    const unsigned int xBlocks = M / (tileColsPerBlock * TILE_DIM);
-    const unsigned int yTheadsPerBlock = tileRowsPerBlock;
-    const unsigned int xThreadsPerBlock = WARP_SIZE * tileColsPerBlock;
+    const unsigned int yBlocks = M / (M_TILES_PER_BLOCK * TILE_DIM);
+    const unsigned int xBlocks = N / (N_TILES_PER_BLOCK * TILE_DIM);
+    const unsigned int yThreadsPerBlock = M_TILES_PER_BLOCK;
+    const unsigned int xThreadsPerBlock = WARP_SIZE * N_TILES_PER_BLOCK;
     dim3 gridDim(xBlocks, yBlocks);
-    dim3 blockDim(xThreadsPerBlock, yTheadsPerBlock);
+    dim3 blockDim(xThreadsPerBlock, yThreadsPerBlock);
     sgemm<<<gridDim, blockDim>>>(dev_A, dev_B, dev_C, dev_D, alpha, beta);
     
     CUDA_CHECK(cudaPeekAtLastError());
     CUDA_CHECK(cudaMemcpy(D, dev_D, M * N * sizeof(half), cudaMemcpyDeviceToHost));
-    
-    if (check_on_cpu) {
-      half D_host[M * N];
+      
+    // if (check_on_cpu) {
+    //   half D_host[M * N];
 
-      for (int m = 0; m < M; m++)
-      {
-        for (int n = 0; n < N; n++)
-        {
+    //   for (int m = 0; m < M; m++)
+    //   {
+    //     for (int n = 0; n < N; n++)
+    //     {
           
-          float acc = 0.0f;
-          for (int k = 0; k < K; k++)
-          {
-            acc += (float) (A[m * K + k] * B[k * N + n]);
-          }
-          D_host[m * N + n] = alpha * (half) acc + beta * C[m * N + n];
-        }
-      }
-    }
+    //       float acc = 0.0f;
+    //       for (int k = 0; k < K; k++)
+    //       {
+    //         acc += (float) (A[m * K + k] * B[k * N + n]);
+    //       }
+    //       D_host[m * N + n] = alpha * (half) acc + beta * C[m * N + n];
+    //     }
+    //   }
+    // }
     return 0;
   }
