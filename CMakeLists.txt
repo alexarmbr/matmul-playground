@@ -14,9 +14,11 @@ endif()
 # cuda include directories
 include_directories(include)
 
-add_executable(test_helpers test/test_helpers.cu)
-target_link_libraries(test_helpers GTest::gtest_main)
+# add_executable(test_helpers test/test_helpers.cu)
+# target_link_libraries(test_helpers GTest::gtest_main)
 
-add_executable(cublas_matmul src/cublas_matmul.cu)
-add_executable(my_matmul src/my_matmul.cu)
-target_link_libraries(cublas_matmul CUDA::cublasLt)
+# add_executable(cublas_matmul src/cublas_matmul.cu)
+# add_executable(my_matmul src/my_matmul.cu)
+# target_link_libraries(cublas_matmul CUDA::cublasLt)
+
+add_executable(tensorcore_helloworld src/tensorcore_helloworld.cu)
