@@ -18,6 +18,8 @@
 
 #define WARP_SIZE 32
 
+using namespace nvcuda;
+
 // D = alpha * A * B + beta * C
 __global__ void sgemm(half* A, half* B, half* C, half* D, float alpha, float beta)
 {
@@ -27,22 +29,26 @@ __global__ void sgemm(half* A, half* B, half* C, half* D, float alpha, float bet
   const unsigned int warpRowIdx = (threadIdx.y + blockIdx.y * blockDim.y) * TILE_DIM; // y threads are spaced out TILE_DIM units
   const unsigned int warpColIdx = (blockIdx.x * warpsPerBlock + warpIdx) * TILE_DIM; // 1 warp, 32 threads with consecutive threadIdx.x
   
-  // compute a 16x16 tile of C
-  // TODO are right flags being passed to nvcc to make sure debug symbols are generated for
-  // device code?
-
-
-  const unsigned int tileCol = threadIdx.x % TILE_DIM;
-  const unsigned int tileRow = laneIdx / TILE_DIM;
-  unsigned int i = (warpRowIdx + tileRow) * N + (warpColIdx + tileCol);
-  const half eps = 0.1;
-  for (int step = 0; step < TILE_DIM / (WARP_SIZE / TILE_DIM); step++)
+  wmma::fragment<wmma::matrix_a, TILE_DIM, TILE_DIM, TILE_DIM, half, wmma::row_major> a_frag;
+  wmma::fragment<wmma::matrix_b, TILE_DIM, TILE_DIM, TILE_DIM, half, wmma::col_major> b_frag;
+  wmma::fragment<wmma::accumulator, TILE_DIM, TILE_DIM, TILE_DIM, half> acc_frag;
+  wmma::fill_fragment(acc_frag, 0.0f);
+  
+  // iterate over 16x16 tiles of A,B along the K dimension
+  unsigned int k_idx = 0;
+  while (k_idx < K)
   {
-    const half c = C[i];
-    D[i] = c + eps;
-    i += (2 * N);
+    // row * stride + col
+    const unsigned int B_tile_index = k_idx * N + warpColIdx;
+    const unsigned int A_tile_index = warpRowIdx * K + k_idx;
+    
+    // arguments are (fragment, pointer to source memory, stride of source memory)
+    wmma::load_matrix_sync(a_frag, A + A_tile_index, K);
+    wmma::load_matrix_sync(b_frag, B + B_tile_index, N);
+    wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
   }
- 
+  const unsigned int D_tile_index = warpRowIdx * N + warpColIdx;
+  wmma::store_matrix_sync(D + D_tile_index, acc_frag, N, wmma::mem_row_major);
 }
 
 
