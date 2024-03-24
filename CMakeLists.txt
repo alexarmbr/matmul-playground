@@ -23,5 +23,5 @@ include_directories(include)
 # target_link_libraries(cublas_matmul CUDA::cublasLt)
 
 add_executable(tensorcore_helloworld src/tensorcore_helloworld.cu)
-# target_compile_options(tensorcore_helloworld PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
+target_compile_options(tensorcore_helloworld PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 

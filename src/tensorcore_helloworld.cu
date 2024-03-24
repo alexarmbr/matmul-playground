@@ -34,12 +34,13 @@ __global__ void sgemm(half* A, half* B, half* C, half* D, float alpha, float bet
 
   const unsigned int tileCol = threadIdx.x % TILE_DIM;
   const unsigned int tileRow = laneIdx / TILE_DIM;
-  unsigned int i = (warpRowIdx + tileRow) * M + (warpColIdx + tileCol);
+  unsigned int i = (warpRowIdx + tileRow) * N + (warpColIdx + tileCol);
   const half eps = 0.1;
   for (int step = 0; step < TILE_DIM / (WARP_SIZE / TILE_DIM); step++)
   {
-    D[i] = C[i] + eps;
-    i+=M;
+    const half c = C[i];
+    D[i] = c + eps;
+    i += (2 * N);
   }
  
 }
@@ -95,6 +96,18 @@ int main(int argc, char **argv) {
     
     CUDA_CHECK(cudaPeekAtLastError());
     CUDA_CHECK(cudaMemcpy(D, dev_D, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+
+    for (int i = 0; i < M * N; i++)
+    {
+      if (D[i] != C[i] + (half) 0.1)
+      {
+        printf("error at index %d, expected %f, got %f\n", i, (float) (C[i] + (half) 0.1), (float) D[i]);
+        return 1;
+      }
+    }
+
+
+
       
     // if (check_on_cpu) {
     //   half D_host[M * N];
