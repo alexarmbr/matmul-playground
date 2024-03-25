@@ -5,24 +5,13 @@
 
 #include "batched-gemm/helper.h"
 
-// #define M 2048
-// #define N 1024
-// #define K 512
-
 #define N 128
 #define M 256
 #define K 64
 
-// #define N 16
-// #define M 16
-// #define K 16
-
 // 8 tiles per block
-// #define M_TILES_PER_BLOCK 2
-// #define N_TILES_PER_BLOCK 4
-#define M_TILES_PER_BLOCK 1
-#define N_TILES_PER_BLOCK 1
-
+#define M_TILES_PER_BLOCK 2
+#define N_TILES_PER_BLOCK 4
 
 // 16 by 16 tiles
 #define TILE_DIM 16
@@ -42,7 +31,6 @@ __global__ void sgemm(half* A, half* B, half* C, half* D, float alpha, float bet
   
   wmma::fragment<wmma::matrix_a, TILE_DIM, TILE_DIM, TILE_DIM, half, wmma::row_major> a_frag;
   wmma::fragment<wmma::matrix_b, TILE_DIM, TILE_DIM, TILE_DIM, half, wmma::row_major> b_frag;
-  
   wmma::fragment<wmma::accumulator, TILE_DIM, TILE_DIM, TILE_DIM, half> c_frag;
   wmma::fragment<wmma::accumulator, TILE_DIM, TILE_DIM, TILE_DIM, float> acc_frag;
   wmma::fill_fragment(acc_frag, 0.0f);
@@ -86,16 +74,17 @@ int main(int argc, char **argv) {
     B = (half *)malloc(K * N * sizeof(half));
     C = (half *)malloc(M * N * sizeof(half));
     D = (half *)malloc(M * N * sizeof(half));
-    half alpha = 0.3;
-    half beta = 0.7;
+    float alpha = 0.3;
+    float beta = 0.7;
 
+    // allocate device matrices
     half *dev_A, *dev_B, *dev_C, *dev_D;
     CUDA_CHECK(cudaMalloc((void **)&dev_A, M * K * sizeof(half)));
     CUDA_CHECK(cudaMalloc((void **)&dev_B, K * N * sizeof(half)));
     CUDA_CHECK(cudaMalloc((void **)&dev_C, M * N * sizeof(half)));
     CUDA_CHECK(cudaMalloc((void **)&dev_D, M * N * sizeof(half)));
 
-    // fill matrices with random elements
+    // fill host matrices with random elements
     srand(1234);
     for (int i = 0; i < M * N; i++) {
       C[i] = (half)(rand() % 10);
@@ -108,26 +97,13 @@ int main(int argc, char **argv) {
     {
       A[i] = (half)(rand() % 10);
     }
-
-    // printf("0th row of A: ");
-    // for (int i = 0; i < K; i++)
-    // {
-    //   printf("%f, ", (float)A[i]);
-    // }
-    // printf("\n");
-    // printf("0th row of B: ");
-    // for (int i = 0; i < N; i++)
-    // {
-    //   printf("%f,", (float)B[i]);
-    // }
-
-
+    
+    // copy to device
     CUDA_CHECK(cudaMemcpy(dev_A, A, M * K * sizeof(half), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(dev_B, B, K * N * sizeof(half), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(dev_C, C, M * N * sizeof(half), cudaMemcpyHostToDevice));
 
-    // launch kernel here
-    // TODO double check this
+    // kernel setup and launch
     const unsigned int yBlocks = M / (M_TILES_PER_BLOCK * TILE_DIM);
     const unsigned int xBlocks = N / (N_TILES_PER_BLOCK * TILE_DIM);
     const unsigned int yThreadsPerBlock = M_TILES_PER_BLOCK;
@@ -137,6 +113,8 @@ int main(int argc, char **argv) {
     sgemm<<<gridDim, blockDim>>>(dev_A, dev_B, dev_C, dev_D, alpha, beta);
     
     CUDA_CHECK(cudaPeekAtLastError());
+    
+    // copy result back to host
     CUDA_CHECK(cudaMemcpy(D, dev_D, M * N * sizeof(half), cudaMemcpyDeviceToHost));
 
     if (check_on_cpu) {
@@ -152,8 +130,7 @@ int main(int argc, char **argv) {
           {
             acc += (float) (A[m * K + k] * B[k * N + n]);
           }
-          // D_host[m * N + n] = (half) acc;
-          // D_host[m * N + n] = alpha * (half) acc + beta * C[m * N + n];
+          D_host[m * N + n] = alpha * acc + (float) ((half) beta * C[m * N + n]);
         }
       }
     
