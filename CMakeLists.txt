@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(matmul-playground LANGUAGES CXX CUDA)
+set(CMAKE_CXX_STANDARD 17)
 
-# googletest
-find_package(GTest REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 enable_testing()
 set(CMAKE_BUILD_TYPE Debug)
@@ -15,13 +14,6 @@ endif()
 # cuda include directories
 include_directories(include)
 
-# add_executable(test_helpers test/test_helpers.cu)
-# target_link_libraries(test_helpers GTest::gtest_main)
-
-# add_executable(cublas_matmul src/cublas_matmul.cu)
-# add_executable(my_matmul src/my_matmul.cu)
-# target_link_libraries(cublas_matmul CUDA::cublasLt)
-
-add_executable(tensorcore_helloworld src/tensorcore_helloworld.cu)
-target_compile_options(tensorcore_helloworld PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
+add_executable(runner src/runner.cu)
+# target_compile_options(tensorcore_helloworld PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 
