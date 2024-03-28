@@ -14,6 +14,6 @@ endif()
 # cuda include directories
 include_directories(include)
 
-add_executable(runner src/runner.cu)
+add_executable(runner src/main.cu)
 # target_compile_options(tensorcore_helloworld PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 

@@ -1,24 +1,34 @@
+#pragma once
 #include <cuda.h>
 #include <mma.h>
 
-#define N 128
-#define M 256
-#define K 64
+// #define N 128
+// #define M 256
+// #define K 64
 
-// 8 tiles per block
-#define M_TILES_PER_BLOCK 2
-#define N_TILES_PER_BLOCK 4
+// // 8 tiles per block
+// #define M_TILES_PER_BLOCK 2
+// #define N_TILES_PER_BLOCK 4
 
-// 16 by 16 tiles
-#define TILE_DIM 16
-
-#define WARP_SIZE 32
+// // 16 by 16 tiles
+// #define TILE_DIM 16
 
 using namespace nvcuda;
 
-// D = alpha * A * B + beta * C
-__global__ void tensorcore_naive_sgemm(half* A, half* B, half* C, half* D, float alpha, float beta)
+template <const unsigned int M_TILES_PER_BLOCK,
+const unsigned int N_TILES_PER_BLOCK,
+const unsigned int TILE_DIM>
+__global__ void tensorcore_naive_sgemm(half* A,
+  half* B,
+  half* C,
+  half* D,
+  const float alpha,
+  const float beta,
+  const unsigned int M,
+  const unsigned int N,
+  unsigned int K)
 {
+  constexpr unsigned int WARP_SIZE = 32;
   const unsigned int laneIdx = threadIdx.x % WARP_SIZE;
   const unsigned int warpIdx = threadIdx.x / WARP_SIZE;
   const unsigned int warpsPerBlock = blockDim.x / WARP_SIZE; // WARP_SIZE should divide blockDim.x
