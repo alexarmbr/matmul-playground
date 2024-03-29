@@ -3,6 +3,9 @@ project(matmul-playground LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(CUDAToolkit REQUIRED)
+find_package(GTest REQUIRED)
+
+
 enable_testing()
 set(CMAKE_BUILD_TYPE Debug)
 
@@ -17,3 +20,5 @@ include_directories(include)
 add_executable(runner src/main.cu)
 # target_compile_options(tensorcore_helloworld PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 
+add_executable(tests src/test.cu)
+target_link_libraries(tests GTest::GTest GTest::Main)

@@ -7,17 +7,17 @@
 // #define K 64
 
 // // 8 tiles per block
-// #define M_TILES_PER_BLOCK 2
-// #define N_TILES_PER_BLOCK 4
+// #define BM 2
+// #define BN 4
 
 // // 16 by 16 tiles
 // #define TILE_DIM 16
 
 using namespace nvcuda;
 
-template <const unsigned int M_TILES_PER_BLOCK,
-const unsigned int N_TILES_PER_BLOCK,
-const unsigned int TILE_DIM>
+template <unsigned int BM,
+unsigned int BN,
+unsigned int TILE_DIM>
 __global__ void tensorcore_naive_sgemm(half* A,
   half* B,
   half* C,

@@ -1,8 +1,7 @@
 #include <assert.h>
 
-#include "util.cuh"
+#include "host_util.cuh"
 #include "kernel_launch.cuh"
-
 
 #define M 256
 #define N 128
