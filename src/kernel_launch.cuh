@@ -2,6 +2,8 @@
 #include "host_util.cuh"
 #include "kernels/fp16/fp16_basic.cuh"
 
+#include <cublas_v2.h>
+#include "cutlass/gemm/device/gemm.h"
 
 void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
 {
@@ -37,4 +39,41 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
         K
     );
     CUDA_CHECK(cudaPeekAtLastError());
+}
+
+void cublas_fp32_launch(sgemm_params<float> device_sgemm_params)
+{
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+    cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, device_sgemm_params.M, device_sgemm_params.N, device_sgemm_params.K, &device_sgemm_params.alpha, device_sgemm_params.A, device_sgemm_params.M, device_sgemm_params.B, device_sgemm_params.K, &device_sgemm_params.beta, device_sgemm_params.C, device_sgemm_params.M);
+    CUDA_CHECK(cudaPeekAtLastError());
+    cublasDestroy(handle);
+}
+
+void cutlass_fp32_launch(sgemm_params<float> device_sgemm_params)
+{
+    using Sgemm = cutlass::gemm::device::Gemm<
+    float,
+    cutlass::layout::RowMajor,
+    float,
+    cutlass::layout::RowMajor,
+    float,
+    cutlass::layout::RowMajor,
+    float>;
+
+    Sgemm sgemm_op;
+    Sgemm::Arguments args(
+        {device_sgemm_params.M, device_sgemm_params.N, device_sgemm_params.K},
+        {device_sgemm_params.A, device_sgemm_params.K},
+        {device_sgemm_params.B, device_sgemm_params.N},
+        {device_sgemm_params.C, device_sgemm_params.N},
+        {device_sgemm_params.D, device_sgemm_params.N},
+        {device_sgemm_params.alpha, device_sgemm_params.beta}
+    );
+    cutlass::Status status = sgemm_op(args);
+
+    if (status != cutlass::Status::kSuccess)
+    {
+        throw std::runtime_error("Cutlass kernel failed");
+    }
 }

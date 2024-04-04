@@ -10,9 +10,11 @@
 int main(int argc, char **argv) {
     bool check_on_cpu = true;
 
-    auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
+    // auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
+    // tensorcore_naive_launch(device_sgemm_params);
+    auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<float>(M, N, K);
+    cublas_fp32_launch(device_sgemm_params);
 
-    tensorcore_naive_launch(device_sgemm_params);
 
     if (check_on_cpu) {
         sgemm_verify(device_sgemm_params, host_sgemm_params);

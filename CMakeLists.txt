@@ -18,6 +18,7 @@ endif()
 include_directories(include)
 
 add_executable(runner src/main.cu)
+target_link_libraries(runner CUDA::cublas)
 
 add_executable(tests src/test.cu)
 target_compile_options(tests PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
