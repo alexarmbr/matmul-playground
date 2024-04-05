@@ -104,7 +104,29 @@ void host_sgemm(sgemm_params<half> params)
 
 void host_sgemm(sgemm_params<float> params)
 {
-    throw std::runtime_error("Not implemented");
+    float *A = params.A;
+    float *B = params.B;
+    float *C = params.C;
+    float *D = params.D;
+    float alpha = params.alpha;
+    float beta = params.beta;
+    unsigned int M = params.M;
+    unsigned int N = params.N;
+    unsigned int K = params.K;
+
+    for (int m = 0; m < M; m++)
+    {
+    for (int n = 0; n < N; n++)
+    {
+        
+        float acc = 0.0f;
+        for (int k = 0; k < K; k++)
+        {
+        acc += (float) (A[m * K + k] * B[k * N + n]);
+        }
+        D[m * N + n] = alpha * acc + beta * C[m * N + n];
+    }
+    }
 }
 
 template <typename T>

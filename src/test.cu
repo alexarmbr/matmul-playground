@@ -11,7 +11,7 @@ __global__ void loadFromGmemKernelWrapper(
     const unsigned int A_stride
 )
 {
-    loadFromGmem<TILE_ROWS, TILE_COLS>(A_gmem, A_shared, A_stride);
+    tileMemcpy<TILE_ROWS, TILE_COLS>(A_gmem, A_shared, A_stride);
 }
 
 
