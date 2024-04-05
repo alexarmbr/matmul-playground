@@ -11,4 +11,10 @@ RUN apt-get update && apt-get install -y cmake libgtest-dev git python3 python3-
 
 RUN mkdir /tmp/cutlass && \
     git clone https://github.com/NVIDIA/cutlass.git /tmp/cutlass && \
-    cd /tmp/cutlass && mkdir -p build && cd build && cmake .. -DCUTLASS_NVCC_ARCHS=75 -DCUTLASS_LIBRARY_KERNELS=gemm && make -j$(nproc) && make install
+    cd /tmp/cutlass && \
+    mkdir -p build && \
+    cd build && \
+    cmake .. -DCUTLASS_NVCC_ARCHS=75 -DCUTLASS_LIBRARY_KERNELS=gemm && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/cutlass
