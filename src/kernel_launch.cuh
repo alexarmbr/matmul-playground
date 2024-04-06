@@ -1,10 +1,13 @@
 #pragma once
-#include "host_util.cuh"
+#include "host_utils.cuh"
 #include "kernels/fp16/fp16_basic.cuh"
 #include "kernels/fp32/fp32_blocktiling.cuh"
 
 #include <cublas_v2.h>
 // #include "cutlass/gemm/device/gemm.h"
+
+
+#define NUM_RUNS 10
 
 void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
 {
@@ -26,6 +29,8 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
     
     dim3 gridDim(xBlocks, yBlocks);
     dim3 blockDim(xThreadsPerBlock, yThreadsPerBlock);
+
+    // warmup
     tensorcore_naive_sgemm
     <BM, BN, TILE_DIM>
     <<<gridDim, blockDim>>>(
@@ -39,6 +44,32 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
         N,
         K
     );
+    CUDA_CHECK(cudaPeekAtLastError());
+    
+    GpuTimer timer;
+    for (int i = 0; i < NUM_RUNS; i++)
+    {
+        timer.Start();
+        tensorcore_naive_sgemm
+        <BM, BN, TILE_DIM>
+        <<<gridDim, blockDim>>>(
+            device_sgemm_params.A,
+            device_sgemm_params.B,
+            device_sgemm_params.C,
+            device_sgemm_params.D,
+            device_sgemm_params.alpha,
+            device_sgemm_params.beta,
+            M,
+            N,
+            K
+        );
+        timer.Stop();
+    }
+    double time_ms = timer.getAvgTime();
+    double gflops_per_sec = (2.0 * M * N * K) / (time_ms * 1.0e6);
+    std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec" << std::endl;
+
+
     CUDA_CHECK(cudaPeekAtLastError());
 }
 

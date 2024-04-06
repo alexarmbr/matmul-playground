@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "host_util.cuh"
+#include "host_utils.cuh"
 #include "kernels/fp32/device_utils.cuh"
 
 

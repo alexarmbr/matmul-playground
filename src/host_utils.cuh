@@ -1,7 +1,10 @@
 #pragma once
 #include "cuda_runtime.h"
 #include <cuda_fp16.h>
+
 #include <iostream>
+#include <vector>
+#include <numeric>
 
 /**
  * Panic wrapper for unwinding CUDA runtime errors
@@ -152,3 +155,41 @@ void sgemm_verify(sgemm_params<T> device_sgemm_params, sgemm_params<T> host_sgem
     host_sgemm(host_sgemm_params);
     assert(elementwise_isclose(D, host_sgemm_params.D, M * N));
 }
+
+struct GpuTimer
+{
+      cudaEvent_t start;
+      cudaEvent_t stop;
+      std::vector<float> times;
+
+      GpuTimer()
+      {
+            cudaEventCreate(&start);
+            cudaEventCreate(&stop);
+      }
+
+      ~GpuTimer()
+      {
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
+      }
+
+      void Start()
+      {
+            cudaEventRecord(start, 0);
+      }
+
+      void Stop()
+      {
+            cudaEventRecord(stop, 0);
+            float elapsed;
+            cudaEventSynchronize(stop);
+            cudaEventElapsedTime(&elapsed, start, stop);
+            times.push_back(elapsed);
+      }
+      double getAvgTime()
+      {
+        double avg_time_ms = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+        return avg_time_ms;
+      }
+};

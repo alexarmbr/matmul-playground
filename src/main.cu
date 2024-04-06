@@ -1,6 +1,6 @@
 #include <assert.h>
 
-#include "host_util.cuh"
+#include "host_utils.cuh"
 #include "kernel_launch.cuh"
 
 #define M 256
