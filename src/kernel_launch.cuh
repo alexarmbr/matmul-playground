@@ -4,12 +4,11 @@
 #include "kernels/fp32/fp32_blocktiling.cuh"
 
 #include <cublas_v2.h>
-#include "cutlass/gemm/device/gemm.h"
 
 
 #define NUM_RUNS 10
 
-void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
+void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer)
 {
     constexpr unsigned int WARP_SIZE = 32;
     const unsigned int BM = 2;
@@ -46,7 +45,6 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
     );
     CUDA_CHECK(cudaPeekAtLastError());
     
-    KernelLogger timer("TensorCoreNaive_1");
     for (int i = 0; i < NUM_RUNS; i++)
     {
         timer.Start();
@@ -65,87 +63,72 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
         );
         timer.Stop();
     }
-    std::string matrixDims = std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
-    double time_ms = timer.logAvgTime(matrixDims);
-    double gflops_per_sec = (2.0 * M * N * K) / (time_ms * 1.0e6);
+    double gflops_per_sec = timer.logKernelStats(M, N, K);
     std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
-
-
-    CUDA_CHECK(cudaPeekAtLastError());
-}
-
-void fp32_blocktiling_launch(sgemm_params<float> device_sgemm_params)
-{
-    constexpr unsigned int BM = 32;
-    constexpr unsigned int BN = 32;
-    constexpr unsigned int BK = 64;
-    const unsigned int M = device_sgemm_params.M;
-    const unsigned int N = device_sgemm_params.N;
-    const unsigned int K = device_sgemm_params.K;
-
-    const unsigned int yBlocks = M / BM;
-    const unsigned int xBlocks = N / BN;
-    const unsigned int yThreadsPerBlock = 1;
-    const unsigned int xThreadsPerBlock = BM * BN;
-
-    dim3 gridDim(xBlocks, yBlocks);
-    dim3 blockDim(xThreadsPerBlock, yThreadsPerBlock);
-    fp32_Blocktiled_Sgemm
-    <BM, BN, BK>
-    <<<gridDim, blockDim>>>(
-        device_sgemm_params.A,
-        device_sgemm_params.B,
-        device_sgemm_params.C,
-        device_sgemm_params.D,
-        device_sgemm_params.alpha,
-        device_sgemm_params.beta,
-        M,
-        N,
-        K
-    );
     CUDA_CHECK(cudaPeekAtLastError());
 }
 
 
-
-void cublas_fp32_launch(sgemm_params<float> device_sgemm_params)
+void cublas_fp16_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer)
 {
     cublasHandle_t handle;
     cublasCreate(&handle);
-    cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, device_sgemm_params.M, device_sgemm_params.N, device_sgemm_params.K, &device_sgemm_params.alpha, device_sgemm_params.A, device_sgemm_params.M, device_sgemm_params.B, device_sgemm_params.K, &device_sgemm_params.beta, device_sgemm_params.C, device_sgemm_params.M);
-    CUDA_CHECK(cudaPeekAtLastError());
-    cublasDestroy(handle);
-}
 
-void cutlass_fp32_launch(sgemm_params<float> device_sgemm_params)
-{
-    using Sgemm = cutlass::gemm::device::Gemm<
-    float,
-    cutlass::layout::RowMajor,
-    float,
-    cutlass::layout::RowMajor,
-    float,
-    cutlass::layout::RowMajor,
-    float>;
+    const half alpha = device_sgemm_params.alpha;
+    const half beta = device_sgemm_params.beta;
+    const int M = device_sgemm_params.M;
+    const int N = device_sgemm_params.N;
+    const int K = device_sgemm_params.K;
 
-    int const M = (int) device_sgemm_params.M;
-    int const N = (int) device_sgemm_params.N;
-    int const K = (int) device_sgemm_params.K;
-
-
-    Sgemm sgemm_op;
-    Sgemm::Arguments args(
-        {M, N, K},
-        {device_sgemm_params.A, device_sgemm_params.K},
-        {device_sgemm_params.B, device_sgemm_params.N},
-        {device_sgemm_params.C, device_sgemm_params.N},
-        {device_sgemm_params.D, device_sgemm_params.N},
-        {device_sgemm_params.alpha, device_sgemm_params.beta}
+    // warmup
+    cublasStatus_t status = cublasHgemm(handle,
+        CUBLAS_OP_N,
+        CUBLAS_OP_N,
+        M,
+        N,
+        K,
+        &alpha,
+        device_sgemm_params.A,
+        K,
+        device_sgemm_params.B,
+        N,
+        &beta,
+        device_sgemm_params.C,
+        N
     );
-    cutlass::Status status = sgemm_op(args);
 
-    if (status != cutlass::Status::kSuccess)
+    if (status != CUBLAS_STATUS_SUCCESS)
     {
-        throw std::runtime_error("Cutlass kernel failed");
+        throw std::runtime_error("cuBLAS kernel failed");
     }
+
+    for (int i = 0; i < NUM_RUNS; i++)
+    {
+        timer.Start();
+        // warmup
+        cublasStatus_t status = cublasHgemm(handle,
+            CUBLAS_OP_N,
+            CUBLAS_OP_N,
+            M,
+            N,
+            K,
+            &alpha,
+            device_sgemm_params.A,
+            K,
+            device_sgemm_params.B,
+            N,
+            &beta,
+            device_sgemm_params.C,
+            N
+        );
+        timer.Stop();
+
+        if (status != CUBLAS_STATUS_SUCCESS)
+        {
+            throw std::runtime_error("cuBLAS kernel failed");
+        }
+    }
+    double gflops_per_sec = timer.logKernelStats(M, N, K);
+    std::cout << "cuBLAS: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
 }
+

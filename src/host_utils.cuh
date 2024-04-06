@@ -140,6 +140,7 @@ bool elementwise_isclose(T* a, T* b, int size, float atol = 1e-5)
     {
         if (std::abs((float) a[i] - (float) b[i]) > atol)
         {
+            std::cout << "Mismatch at index " << i << ": " << (float) a[i] << " != " << (float) b[i] << std::endl;
             return false;
         }
     }
@@ -179,7 +180,7 @@ struct KernelLogger
             // logs to csv file
             std::ofstream file;
             file.open(loggerName + ".csv");
-            file << "info, avg_time_ms\n";
+            file << "info, gflops_per_sec\n";
             for (auto log : logs)
             {
                   file << log.first << ", " << log.second << "\n";
@@ -200,11 +201,14 @@ struct KernelLogger
             cudaEventElapsedTime(&elapsed, start, stop);
             times.push_back(elapsed);
       }
-      double logAvgTime(std::string info)
+      double logKernelStats(const unsigned int M, const unsigned int N, const unsigned int K)
       {
         double avg_time_ms = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+        double total_flops = 2.0 * M * N * K;
+        double gflops_per_sec = (total_flops) / (avg_time_ms * 1.0e6);
         times.clear();
-        logs.push_back(std::make_pair(info, avg_time_ms));
-        return avg_time_ms;
+        std::string info = std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
+        logs.push_back(std::make_pair(info, gflops_per_sec));
+        return gflops_per_sec;
       }
 };
