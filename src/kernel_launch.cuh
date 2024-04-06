@@ -67,7 +67,7 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
     }
     double time_ms = timer.getAvgTime();
     double gflops_per_sec = (2.0 * M * N * K) / (time_ms * 1.0e6);
-    std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec" << std::endl;
+    std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
 
 
     CUDA_CHECK(cudaPeekAtLastError());
