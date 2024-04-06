@@ -46,7 +46,7 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
     );
     CUDA_CHECK(cudaPeekAtLastError());
     
-    GpuTimer timer;
+    KernelLogger timer("TensorCoreNaive_1");
     for (int i = 0; i < NUM_RUNS; i++)
     {
         timer.Start();
@@ -65,11 +65,10 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params)
         );
         timer.Stop();
     }
-    double time_ms = timer.getAvgTime();
+    std::string matrixDims = std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
+    double time_ms = timer.logAvgTime(matrixDims);
     double gflops_per_sec = (2.0 * M * N * K) / (time_ms * 1.0e6);
     std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec" << std::endl;
-
-
     CUDA_CHECK(cudaPeekAtLastError());
 }
 

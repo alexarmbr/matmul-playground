@@ -3,6 +3,7 @@
 #include <cuda_fp16.h>
 
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <numeric>
 
@@ -156,22 +157,34 @@ void sgemm_verify(sgemm_params<T> device_sgemm_params, sgemm_params<T> host_sgem
     assert(elementwise_isclose(D, host_sgemm_params.D, M * N));
 }
 
-struct GpuTimer
+struct KernelLogger
 {
       cudaEvent_t start;
       cudaEvent_t stop;
       std::vector<float> times;
+      std::string loggerName;
+      std::vector<std::pair<std::string, double>> logs;
 
-      GpuTimer()
+      KernelLogger(std::string loggerName) : loggerName(loggerName)
       {
             cudaEventCreate(&start);
             cudaEventCreate(&stop);
       }
 
-      ~GpuTimer()
+      ~KernelLogger()
       {
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
+
+            // logs to csv file
+            std::ofstream file;
+            file.open(loggerName + ".csv");
+            file << "info, avg_time_ms\n";
+            for (auto log : logs)
+            {
+                  file << log.first << ", " << log.second << "\n";
+            }
+            file.close();
       }
 
       void Start()
@@ -187,9 +200,11 @@ struct GpuTimer
             cudaEventElapsedTime(&elapsed, start, stop);
             times.push_back(elapsed);
       }
-      double getAvgTime()
+      double logAvgTime(std::string info)
       {
         double avg_time_ms = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+        times.clear();
+        logs.push_back(std::make_pair(info, avg_time_ms));
         return avg_time_ms;
       }
 };
