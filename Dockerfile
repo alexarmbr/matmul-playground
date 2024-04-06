@@ -16,5 +16,4 @@ RUN mkdir /tmp/cutlass && \
     cd build && \
     cmake .. -DCUTLASS_NVCC_ARCHS=75 -DCUTLASS_LIBRARY_KERNELS=gemm && \
     make -j$(nproc) && \
-    make install && \
-    rm -rf /tmp/cutlass
+    make install
