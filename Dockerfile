@@ -8,7 +8,7 @@ RUN apt-get update && \
     apt-get update
 
 RUN apt-get update && apt-get install -y cmake libgtest-dev git python3 python3-pip
-
+RUN pip install cuda-python
 RUN mkdir /tmp/cutlass && \
     git clone https://github.com/NVIDIA/cutlass.git /tmp/cutlass && \
     cd /tmp/cutlass && \
