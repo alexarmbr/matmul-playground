@@ -4,7 +4,7 @@
 #include "kernels/fp32/fp32_blocktiling.cuh"
 
 #include <cublas_v2.h>
-// #include "cutlass/gemm/device/gemm.h"
+#include "cutlass/gemm/device/gemm.h"
 
 
 #define NUM_RUNS 10
@@ -116,30 +116,35 @@ void cublas_fp32_launch(sgemm_params<float> device_sgemm_params)
     cublasDestroy(handle);
 }
 
-// void cutlass_fp32_launch(sgemm_params<float> device_sgemm_params)
-// {
-//     using Sgemm = cutlass::gemm::device::Gemm<
-//     float,
-//     cutlass::layout::RowMajor,
-//     float,
-//     cutlass::layout::RowMajor,
-//     float,
-//     cutlass::layout::RowMajor,
-//     float>;
+void cutlass_fp32_launch(sgemm_params<float> device_sgemm_params)
+{
+    using Sgemm = cutlass::gemm::device::Gemm<
+    float,
+    cutlass::layout::RowMajor,
+    float,
+    cutlass::layout::RowMajor,
+    float,
+    cutlass::layout::RowMajor,
+    float>;
 
-//     Sgemm sgemm_op;
-//     Sgemm::Arguments args(
-//         {device_sgemm_params.M, device_sgemm_params.N, device_sgemm_params.K},
-//         {device_sgemm_params.A, device_sgemm_params.K},
-//         {device_sgemm_params.B, device_sgemm_params.N},
-//         {device_sgemm_params.C, device_sgemm_params.N},
-//         {device_sgemm_params.D, device_sgemm_params.N},
-//         {device_sgemm_params.alpha, device_sgemm_params.beta}
-//     );
-//     cutlass::Status status = sgemm_op(args);
+    int const M = (int) device_sgemm_params.M;
+    int const N = (int) device_sgemm_params.N;
+    int const K = (int) device_sgemm_params.K;
 
-//     if (status != cutlass::Status::kSuccess)
-//     {
-//         throw std::runtime_error("Cutlass kernel failed");
-//     }
-// }
+
+    Sgemm sgemm_op;
+    Sgemm::Arguments args(
+        {M, N, K},
+        {device_sgemm_params.A, device_sgemm_params.K},
+        {device_sgemm_params.B, device_sgemm_params.N},
+        {device_sgemm_params.C, device_sgemm_params.N},
+        {device_sgemm_params.D, device_sgemm_params.N},
+        {device_sgemm_params.alpha, device_sgemm_params.beta}
+    );
+    cutlass::Status status = sgemm_op(args);
+
+    if (status != cutlass::Status::kSuccess)
+    {
+        throw std::runtime_error("Cutlass kernel failed");
+    }
+}
