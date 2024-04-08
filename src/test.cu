@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "host_utils.cuh"
-#include "kernels/fp32/device_utils.cuh"
+#include "kernels/device_utils.cuh"
 
 
 template<unsigned int TILE_ROWS,
@@ -11,7 +11,7 @@ __global__ void loadFromGmemKernelWrapper(
     const unsigned int A_stride
 )
 {
-    tileMemcpy<TILE_ROWS, TILE_COLS>(A_gmem, A_shared, A_stride);
+    tileMemcpy<TILE_ROWS, TILE_COLS, float>(A_gmem, A_shared, A_stride, TILE_ROWS);
 }
 
 
@@ -31,9 +31,6 @@ TEST(TestFp32Utils, TestLoadTileFromGmem)
     CUDA_CHECK(cudaMalloc(&A_shared_device, TILE_ROWS * TILE_COLS * sizeof(float)));
     CUDA_CHECK(cudaMemset(A_shared_device, 0, TILE_ROWS * TILE_COLS * sizeof(float)));
 
-    const unsigned int row_offset = 64;
-    const unsigned int col_offset = 128;
-    
     for (int i = 0; i < M * N; i++)
     {
         A_gmem_host[i] = i;

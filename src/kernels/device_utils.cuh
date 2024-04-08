@@ -7,16 +7,18 @@
 // iterations is the # of times we need to iterate, passed
 // as a parameter so that each thread isnt computing the same
 // value. It is ceil((TILE_ROWS * TILE_COLS) / blockDim.x)
+
+// TODO there needs to be a dst_stride argument
 template<unsigned int TILE_ROWS,
-unsigned int TILE_COLS>
+unsigned int TILE_COLS,
+typename T>
 __device__ void tileMemcpy(
-    float* src,
-    float* dst,
-    const unsigned int A_stride
+    T* src,
+    T* dst,
+    const unsigned int src_stride,
+    const unsigned int dst_stride
 )
 {
-    // make sure blockDim.x divides TILE_COLS * TILE_ROWS
-    // TODO move this calculation and assertion to host code
     const unsigned int iterations = (TILE_COLS * TILE_ROWS) / blockDim.x;
     assert(iterations * blockDim.x == TILE_COLS * TILE_ROWS);
     assert(threadIdx.y == 0);
@@ -25,12 +27,12 @@ __device__ void tileMemcpy(
     const unsigned int col = threadIdx.x - (row * TILE_COLS);
     const unsigned int thread_step = blockDim.x / TILE_COLS;
 
-    src += row * A_stride + col;
-    dst += row * TILE_COLS + col;
+    src += row * src_stride + col;
+    dst += row * dst_stride + col;
     for (unsigned int step = 0; step < iterations; step++)
     {
         *dst = *src;
-        src += (thread_step * A_stride);
-        dst += (thread_step * TILE_COLS);
+        src += (thread_step * src_stride);
+        dst += (thread_step * dst_stride);
     }
 }

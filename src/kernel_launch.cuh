@@ -1,14 +1,15 @@
 #pragma once
 #include "host_utils.cuh"
-#include "kernels/fp16/fp16_basic.cuh"
-#include "kernels/fp32/fp32_blocktiling.cuh"
+#include "kernels/tensorcore_1.cuh"
+#include "kernels/tensorcore_2.cuh"
+#include "kernels/fp32_blocktiling.cuh"
 
 #include <cublas_v2.h>
 
 
 #define NUM_RUNS 10
 
-void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer)
+void tensorcore_1_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer)
 {
     constexpr unsigned int WARP_SIZE = 32;
     const unsigned int BM = 2;
@@ -30,7 +31,7 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params, KernelLogge
     dim3 blockDim(xThreadsPerBlock, yThreadsPerBlock);
 
     // warmup
-    tensorcore_naive_sgemm
+    tensorcore_1
     <BM, BN, TILE_DIM>
     <<<gridDim, blockDim>>>(
         device_sgemm_params.A,
@@ -48,7 +49,7 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params, KernelLogge
     for (int i = 0; i < NUM_RUNS; i++)
     {
         timer.Start();
-        tensorcore_naive_sgemm
+        tensorcore_1
         <BM, BN, TILE_DIM>
         <<<gridDim, blockDim>>>(
             device_sgemm_params.A,
@@ -67,6 +68,18 @@ void tensorcore_naive_launch(sgemm_params<half> device_sgemm_params, KernelLogge
     std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
     CUDA_CHECK(cudaPeekAtLastError());
 }
+
+
+void tensorcore_2_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer)
+{
+
+}
+
+
+
+
+
+
 
 
 void cublas_fp16_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer)

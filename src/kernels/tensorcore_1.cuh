@@ -18,7 +18,7 @@ using namespace nvcuda;
 template <unsigned int BM,
 unsigned int BN,
 unsigned int TILE_DIM>
-__global__ void tensorcore_naive_sgemm(half* A,
+__global__ void tensorcore_1(half* A,
   half* B,
   half* C,
   half* D,
