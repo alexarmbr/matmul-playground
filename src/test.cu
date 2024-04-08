@@ -4,14 +4,16 @@
 
 
 template<unsigned int TILE_ROWS,
-unsigned int TILE_COLS>
+unsigned int TILE_COLS,
+typename T>
 __global__ void loadFromGmemKernelWrapper(
-    float* A_gmem,
-    float* A_shared,
-    const unsigned int A_stride
+    float* src,
+    float* dst,
+    const unsigned int src_stride,
+    const unsigned int dst_stride
 )
 {
-    tileMemcpy<TILE_ROWS, TILE_COLS, float>(A_gmem, A_shared, A_stride, TILE_ROWS);
+    tileMemcpy<TILE_ROWS, TILE_COLS, T>(src, dst, src_stride, dst_stride);
 }
 
 
@@ -44,11 +46,12 @@ TEST(TestFp32Utils, TestLoadTileFromGmem)
     dim3 gridDim(xBlocks, yBlocks);
     dim3 blockDim(xThreadsPerBlock, yThreadsPerBlock);
     
-    loadFromGmemKernelWrapper<TILE_ROWS, TILE_COLS>
+    loadFromGmemKernelWrapper<TILE_ROWS, TILE_COLS, float>
     <<<gridDim, blockDim>>>(
         A_gmem_device,
         A_shared_device,
-        N
+        N,
+        TILE_COLS
     );
     CUDA_CHECK(cudaPeekAtLastError());
     CUDA_CHECK(cudaMemcpy(A_shared_host, A_shared_device, TILE_ROWS * TILE_COLS * sizeof(float), cudaMemcpyDeviceToHost));
@@ -59,7 +62,7 @@ TEST(TestFp32Utils, TestLoadTileFromGmem)
             if (A_shared_host[row * TILE_COLS + col] != A_gmem_host[row * N + col])
             {
                 printf("Expected %f but got %f at row %d, col %d\n", A_gmem_host[row * N + col], A_shared_host[row * TILE_COLS + col], row, col);
-                EXPECT_EQ(A_shared_host[row * TILE_COLS + col], A_gmem_host[row * N + col]);
+                ASSERT_EQ(A_shared_host[row * TILE_COLS + col], A_gmem_host[row * N + col]);
             }
         }
     }

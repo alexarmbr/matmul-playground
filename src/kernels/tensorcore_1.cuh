@@ -29,7 +29,6 @@ __global__ void tensorcore_1(half* A,
   unsigned int K)
 {
   constexpr unsigned int WARP_SIZE = 32;
-  const unsigned int laneIdx = threadIdx.x % WARP_SIZE;
   const unsigned int warpIdx = threadIdx.x / WARP_SIZE;
   const unsigned int warpsPerBlock = blockDim.x / WARP_SIZE; // WARP_SIZE should divide blockDim.x
   const unsigned int warpRowIdx = (threadIdx.y + blockIdx.y * blockDim.y) * TILE_DIM; // y threads are spaced out TILE_DIM units

@@ -22,33 +22,73 @@ __global__ void tensorcore_2(half* A,
   const unsigned int N,
   unsigned int K)
 {
-
   static_assert(BM_dim % WM_dim == 0);
   static_assert(BN_dim % WN_dim == 0);
   constexpr unsigned int WARPS_PER_BLOCK_M = BM_dim / WM_dim;
   constexpr unsigned int WARPS_PER_BLOCK_N = BN_dim / WN_dim;
   constexpr unsigned int WARP_SIZE = 32;
+  const unsigned int A_stride = N;
+  const unsigned int B_stride = K;
+  const unsigned int CD_stride = N;
   
   // top left coords of the block tile
   const unsigned int block_m = blockIdx.y * BM_dim;
   const unsigned int block_n = blockIdx.x * BN_dim;
   
   // top left coords of a warp tile, relative to the block tile its in
-  // TODO get rid of threadIdx.y
   const unsigned int warp_index = threadIdx.x / WARP_SIZE;
-  const unsigned int warp_m = warp_index / WARPS_PER_BLOCK_N;
-  const unsigned int warp_n = warp_index - (warp_m * WARPS_PER_BLOCK_M);
+  const unsigned int warp_tile_m = warp_index / WARPS_PER_BLOCK_N;
+  const unsigned int warp_tile_n = warp_index - (warp_tile_m * WARPS_PER_BLOCK_N);
+  const unsigned int warp_m = warp_tile_m * WM_dim;
+  const unsigned int warp_n = warp_tile_n * WN_dim;
 
-  __shared__ float A_shmem_blocktile[BK_dim * BN_dim * WK_dim * WN_dim];
-  __shared__ float B_shmem_blocktile[BM_dim * BK_dim * WM_dim * WK_dim];
-  __shared__ float CD_shmem_blocktile[BM_dim * BN_dim * WM_dim * WN_dim];
+  // declare shared memory tiles for caching matrix tiles at block level
+  __shared__ half A_shmem_blocktile[BK_dim * BN_dim];
+  __shared__ half B_shmem_blocktile[BM_dim * BK_dim];
+  __shared__ half CD_shmem_blocktile[BM_dim * BN_dim];
+  constexpr unsigned int A_shmem_stride = BN_dim;
+  constexpr unsigned int B_shmem_stride = BK_dim;
+  constexpr unsigned int CD_shmem_stride = BN_dim;
 
-  // for (int block_k = 0; block_k )
-  // tileMemcpy<BN, BM, half>(C + block_m * N + block_n, CD_shmem_blocktile, N);
-  // tileMemcpy<BN, BN, half>(CD_shmem_blocktile, D + block_m * N + block_n)
+  // declare wmma fragments for caching matrix fragments at warp level
+  wmma::fragment<wmma::matrix_a, WM_dim, WN_dim, WK_dim, half, wmma::row_major> a_frag;
+  wmma::fragment<wmma::matrix_b, WM_dim, WN_dim, WK_dim, half, wmma::row_major> b_frag;
+  wmma::fragment<wmma::accumulator, WM_dim, WN_dim, WK_dim, half> c_frag;
+  wmma::fragment<wmma::accumulator, WM_dim, WN_dim, WK_dim, float> acc_frag;
+  wmma::fill_fragment(acc_frag, 0.0f);
 
+  // load tile of C ahead of time
+  tileMemcpy<BM_dim, BN_dim, half>(C + block_m * CD_stride + block_n, CD_shmem_blocktile, CD_stride, CD_shmem_stride);
+  
+  for (unsigned int block_k = 0; block_k < K; block_k += BK_dim)
+  {
+    // load in current tile of A,B along K dimension
+    tileMemcpy<BK_dim, BN_dim, half>(A + block_k * A_stride + block_n, A_shmem_blocktile, A_stride, A_shmem_stride);
+    tileMemcpy<BM_dim, BK_dim, half>(B + block_m * B_stride + block_k, B_shmem_blocktile, B_stride, B_shmem_stride);
+    
+    __syncthreads();
 
-
+    for (unsigned int warp_k = 0; warp_k < BK_dim; warp_k += WK_dim)
+    {
+      const unsigned int A_tile_index = warp_k * A_shmem_stride + warp_n;
+      const unsigned int B_tile_index = warp_m * B_shmem_stride + warp_k;
+      wmma::load_matrix_sync(a_frag, A_shmem_blocktile + A_tile_index, A_shmem_stride);
+      wmma::load_matrix_sync(b_frag, B_shmem_blocktile + B_tile_index, B_shmem_stride);
+      wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
+    }
+    __syncthreads();
+  }
+  
+  const unsigned int CD_tile_index = warp_m * CD_shmem_stride + warp_n;
+  wmma::load_matrix_sync(c_frag, CD_shmem_blocktile + CD_tile_index, CD_shmem_stride, wmma::mem_row_major);
+  const half beta_ = (half) beta;
+  for (int i = 0; i < c_frag.num_elements; i++)
+  {
+    c_frag.x[i] = alpha * acc_frag.x[i] + (float) (beta_ * c_frag.x[i]);
+  }
+  
+  wmma::store_matrix_sync(CD_shmem_blocktile + CD_tile_index, c_frag, CD_shmem_stride, wmma::mem_row_major);
+  tileMemcpy<BM_dim, BN_dim, half>(CD_shmem_blocktile, D + block_m * CD_stride + block_n, CD_shmem_stride, CD_stride);
 }
 
 
