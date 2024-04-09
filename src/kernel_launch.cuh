@@ -6,17 +6,14 @@
 
 #include <cublas_v2.h>
 
-
-#define NUM_RUNS 10
-
-void tensorcore_1_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer)
+void tensorcore_1_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     constexpr unsigned int WM_dim = 16;
     constexpr unsigned int WN_dim = 16;
     constexpr unsigned int WK_dim = 16;
     constexpr unsigned int WARPS_PER_BLOCK_M = 2;
-    constexpr unsigned int WARPS_PER_BLOCK_N = 2;
-    constexpr unsigned int WARPS_PER_BLOCK_K = 2;
+    constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_K = 1;
     constexpr unsigned int BM_dim = WM_dim * WARPS_PER_BLOCK_M;
     constexpr unsigned int BN_dim = WN_dim * WARPS_PER_BLOCK_N;
     constexpr unsigned int BK_dim = WK_dim * WARPS_PER_BLOCK_K; 
@@ -50,31 +47,34 @@ void tensorcore_1_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaPeekAtLastError());
     
-    // for (int i = 0; i < NUM_RUNS; i++)
-    // {
-    //     timer.Start();
-    //     tensorcore_1
-    //     <BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>
-    //     <<<gridDim, blockDim>>>(
-    //         device_sgemm_params.A,
-    //         device_sgemm_params.B,
-    //         device_sgemm_params.C,
-    //         device_sgemm_params.D,
-    //         device_sgemm_params.alpha,
-    //         device_sgemm_params.beta,
-    //         M,
-    //         N,
-    //         K
-    //     );
-    //     timer.Stop();
-    // }
-    // double gflops_per_sec = timer.logKernelStats(M, N, K);
-    // std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
-    // CUDA_CHECK(cudaPeekAtLastError());
+    if (num_runs != 0)
+    {
+        for (int i = 0; i < num_runs; i++)
+        {
+            timer.Start();
+            tensorcore_1
+            <BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>
+            <<<gridDim, blockDim>>>(
+                device_sgemm_params.A,
+                device_sgemm_params.B,
+                device_sgemm_params.C,
+                device_sgemm_params.D,
+                device_sgemm_params.alpha,
+                device_sgemm_params.beta,
+                M,
+                N,
+                K
+            );
+            timer.Stop();
+        }
+        double gflops_per_sec = timer.logKernelStats(M, N, K);
+        std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
+        CUDA_CHECK(cudaPeekAtLastError());
+    }
 }
 
 
-void tensorcore_2_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer)
+void tensorcore_2_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     constexpr unsigned int WM_dim = 16;
     constexpr unsigned int WN_dim = 16;
@@ -118,27 +118,30 @@ void tensorcore_2_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaPeekAtLastError());
 
-    // for (int i = 0; i < NUM_RUNS; i++)
-    // {
-    //     timer.Start();
-    //     tensorcore_2
-    //     <BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>
-    //     <<<gridDim, blockDim>>>(
-    //         device_sgemm_params.A,
-    //         device_sgemm_params.B,
-    //         device_sgemm_params.C,
-    //         device_sgemm_params.D,
-    //         device_sgemm_params.alpha,
-    //         device_sgemm_params.beta,
-    //         M,
-    //         N,
-    //         K
-    //     );
-    //     timer.Stop();
-    // }
-    // double gflops_per_sec = timer.logKernelStats(M, N, K);
-    // std::cout << "Tiled TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
-    // CUDA_CHECK(cudaPeekAtLastError());
+    if (num_runs != 0)
+    {
+        for (int i = 0; i < num_runs; i++)
+        {
+            timer.Start();
+            tensorcore_2
+            <BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>
+            <<<gridDim, blockDim>>>(
+                device_sgemm_params.A,
+                device_sgemm_params.B,
+                device_sgemm_params.C,
+                device_sgemm_params.D,
+                device_sgemm_params.alpha,
+                device_sgemm_params.beta,
+                M,
+                N,
+                K
+            );
+            timer.Stop();
+        }
+        double gflops_per_sec = timer.logKernelStats(M, N, K);
+        std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
+        CUDA_CHECK(cudaPeekAtLastError());
+    }
 
 }
 
