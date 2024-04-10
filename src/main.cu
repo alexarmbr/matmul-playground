@@ -25,7 +25,7 @@
 
 
   int main(int argc, char **argv) {
-    bool check_on_cpu = false;
+    bool check_on_cpu = true;
 
     if (argc != 2)
     {
@@ -36,17 +36,24 @@
     std::string timer_name = "kernel_" + std::to_string(kernel_id);
 
     KernelLogger timer(timer_name);
-    const unsigned int M = 4096;
-    const unsigned int N = 4096;
-    const unsigned int K = 4096;
+    const unsigned int M = 16;
+    const unsigned int N = 16;
+    const unsigned int K = 64;
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
+    device_sgemm_params.alpha = 1.0f;
+    device_sgemm_params.beta = 0.0f;
+    host_sgemm_params.alpha = 1.0f;
+    host_sgemm_params.beta = 0.0f;
     switch (kernel_id) {
         case 1:
             tensorcore_1_launch(device_sgemm_params, timer, 0);
             break;
         case 2:
             tensorcore_2_launch(device_sgemm_params, timer, 0);
+            break;
+        case 3:
+            tensorcore_3_launch(device_sgemm_params, timer, 0);
             break;
     }
     

@@ -61,10 +61,19 @@ __global__ void tensorcore_3(half* A,
   constexpr unsigned int MMA_TILES_M = WM_dim / MMA_M_dim;
   constexpr unsigned int MMA_TILES_N = WN_dim / MMA_N_dim;
   constexpr unsigned int MMA_TILES_K = WK_dim / MMA_K_dim;
-  wmma::fragment<wmma::matrix_a, WM_dim, WN_dim, WK_dim, half, wmma::row_major> a_frag;
-  wmma::fragment<wmma::matrix_b, WM_dim, WN_dim, WK_dim, half, wmma::row_major> b_frag[MMA_TILES_K][MMA_TILES_N];
-  wmma::fragment<wmma::accumulator, WM_dim, WN_dim, WK_dim, half> c_frag;
-  wmma::fragment<wmma::accumulator, WM_dim, WN_dim, WK_dim, float> acc_frag[MMA_TILES_M][MMA_TILES_N];
+  wmma::fragment<wmma::matrix_a, MMA_M_dim, MMA_N_dim, MMA_K_dim, half, wmma::row_major> a_frag;
+  wmma::fragment<wmma::matrix_b, MMA_M_dim, MMA_N_dim, MMA_K_dim, half, wmma::row_major> b_frag[MMA_TILES_K][MMA_TILES_N];
+  wmma::fragment<wmma::accumulator, MMA_M_dim, MMA_N_dim, MMA_K_dim, half> c_frag;
+  wmma::fragment<wmma::accumulator, MMA_M_dim, MMA_N_dim, MMA_K_dim, float> acc_frag[MMA_TILES_M][MMA_TILES_N];
+  for (unsigned int tile_m = 0; tile_m < MMA_TILES_M; tile_m++)
+  {
+    for (unsigned int tile_n = 0; tile_n < MMA_TILES_N; tile_n++)
+    {
+      wmma::fill_fragment(acc_frag[tile_m][tile_n], 0.0f);
+    }
+  }
+
+
 
   // load tile of C into shared memory ahead of time
   tileMemcpy<BM_dim, BN_dim, half>(C + block_m * CD_stride + block_n, CD_shmem_blocktile, CD_stride, CD_shmem_stride);
@@ -117,25 +126,22 @@ __global__ void tensorcore_3(half* A,
   }
   
   // loop over tiles of C,D and accumulate the final result from C, acc_frag into D
-  // const unsigned int CD_warp_index = warp_m * CD_shmem_stride + warp_n;
-  // for (unsigned int tile_m = 0; tile_m < MMA_TILES_M; tile_m++)
-  // {
-  //   for (unsigned int tile_n = 0; tile_n < MMA_TILES_N; tile_n++)
-  //   {
-  //     const unsigned int CD_tile_index = CD_warp_index + (tile_m * MMA_TILES_M * CD_shmem_stride) + (tile_n * MMA_N_dim);
-  //     wmma::load_matrix_sync(c_frag, CD_shmem_blocktile + CD_tile_index, CD_shmem_stride);
+  const unsigned int CD_warp_index = warp_m * CD_shmem_stride + warp_n;
+  const half beta_ = (half) beta;
+  for (unsigned int tile_m = 0; tile_m < MMA_TILES_M; tile_m++)
+  {
+    for (unsigned int tile_n = 0; tile_n < MMA_TILES_N; tile_n++)
+    {
+      const unsigned int CD_tile_index = CD_warp_index + (tile_m * MMA_TILES_M * CD_shmem_stride) + (tile_n * MMA_N_dim);
+      wmma::load_matrix_sync(c_frag, CD_shmem_blocktile + CD_tile_index, CD_shmem_stride, wmma::mem_row_major);
+      for (int i = 0; i < c_frag.num_elements; i++)
+      {
+        c_frag.x[i] = alpha * acc_frag[tile_m][tile_n].x[i] + (float) (beta_ * c_frag.x[i]);
+      }
+      wmma::store_matrix_sync(CD_shmem_blocktile + CD_tile_index, c_frag, CD_shmem_stride, wmma::mem_row_major);
+    }
+  }
 
-  //   }
-  // }
-  
-  // wmma::load_matrix_sync(c_frag, CD_shmem_blocktile + CD_tile_index, CD_shmem_stride, wmma::mem_row_major);
-  // const half beta_ = (half) beta;
-  // for (int i = 0; i < c_frag.num_elements; i++)
-  // {
-  //   c_frag.x[i] = alpha * acc_frag.x[i] + (float) (beta_ * c_frag.x[i]);
-  // }
-  
-  // wmma::store_matrix_sync(CD_shmem_blocktile + CD_tile_index, c_frag, CD_shmem_stride, wmma::mem_row_major);
   __syncthreads();
   tileMemcpy<BM_dim, BN_dim, half>(CD_shmem_blocktile, D + block_m * CD_stride + block_n, CD_shmem_stride, CD_stride);
 }

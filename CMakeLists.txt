@@ -22,6 +22,6 @@ target_link_libraries(runner CUDA::cublas)
 target_include_directories(runner PRIVATE /tmp/cutlass/include)
 
 add_executable(tests src/test.cu)
-target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
+target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 
 target_link_libraries(tests GTest::GTest GTest::Main)

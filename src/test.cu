@@ -20,10 +20,10 @@ __global__ void loadFromGmemKernelWrapper(
 // test the kernel
 TEST(TestFp32Utils, TestLoadTileFromGmem)
 {
-    const unsigned int M = 512;
-    const unsigned int N = 256;
-    const unsigned int TILE_ROWS = 16;
-    const unsigned int TILE_COLS = 32;
+    const unsigned int M = 64;
+    const unsigned int N = 16;
+    const unsigned int TILE_ROWS = 64;
+    const unsigned int TILE_COLS = 16;
 
     float* A_gmem_host = new float[M * N];
     float* A_shared_host = new float[TILE_ROWS * TILE_COLS];
