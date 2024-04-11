@@ -169,10 +169,6 @@ void tensorcore_3_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     constexpr unsigned int BM_dim = WM_dim * WARP_TILES_PER_BLOCK_M;
     constexpr unsigned int BN_dim = WN_dim * WARP_TILES_PER_BLOCK_N;
     constexpr unsigned int BK_dim = WK_dim * WARP_TILES_PER_BLOCK_K;
-    
-    printf("BM_dim: %d, BN_dim: %d, BK_dim: %d\n", BM_dim, BN_dim, BK_dim);
-    printf("WM_dim: %d, WN_dim: %d, WK_dim: %d\n", WM_dim, WN_dim, WK_dim);
-    printf("MMA_M_dim: %d, MMA_N_dim: %d, MMA_K_dim: %d\n", MMA_M_dim, MMA_N_dim, MMA_K_dim);
 
     const unsigned int M = device_sgemm_params.M;
     const unsigned int N = device_sgemm_params.N;
@@ -190,8 +186,6 @@ void tensorcore_3_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
-    printf("gridDim: %d, %d\n", gridDim.x, gridDim.y);
-    printf("blockDim: %d, %d\n", blockDim.x, blockDim.y);
 
     tensorcore_3
     <BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, MMA_M_dim, MMA_N_dim, MMA_K_dim>

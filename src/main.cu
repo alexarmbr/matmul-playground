@@ -27,13 +27,16 @@
   int main(int argc, char **argv) {
     bool check_on_cpu = false;
 
-    if (argc != 2)
-    {
-        std::cerr << "Usage: " << argv[0] << " <kernel_id>" << std::endl;
+    
+    if (argc != 3) {
+        std::cerr << "Usage: " << argv[0] << " <kernel_id> <num_iterations>" << std::endl;
         return 1;
     }
+
+
     const unsigned int kernel_id = std::stoi(argv[1]);
     std::string timer_name = "kernel_" + std::to_string(kernel_id);
+    const unsigned int num_iterations = std::stoi(argv[2]);
 
     KernelLogger timer(timer_name);
     const unsigned int M = 4096;
@@ -47,13 +50,13 @@
     host_sgemm_params.beta = 0.0f;
     switch (kernel_id) {
         case 1:
-            tensorcore_1_launch(device_sgemm_params, timer, 10);
+            tensorcore_1_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 2:
-            tensorcore_2_launch(device_sgemm_params, timer, 10);
+            tensorcore_2_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 3:
-            tensorcore_3_launch(device_sgemm_params, timer, 10);
+            tensorcore_3_launch(device_sgemm_params, timer, num_iterations);
             break;
     }
     
