@@ -3,8 +3,8 @@
 #include "kernels/device_utils.cuh"
 
 
-template<unsigned int TILE_ROWS,
-unsigned int TILE_COLS,
+template<unsigned int M,
+unsigned int N,
 typename T>
 __global__ void loadFromGmemKernelWrapper(
     float* src,
@@ -13,7 +13,7 @@ __global__ void loadFromGmemKernelWrapper(
     const unsigned int dst_stride
 )
 {
-    tileMemcpy<TILE_ROWS, TILE_COLS, T>(src, dst, src_stride, dst_stride);
+    tileMemcpy<M, N, T>(src, dst, src_stride, dst_stride);
 }
 
 
@@ -22,23 +22,21 @@ TEST(TestFp32Utils, TestLoadTileFromGmem)
 {
     const unsigned int M = 64;
     const unsigned int N = 16;
-    const unsigned int TILE_ROWS = 64;
-    const unsigned int TILE_COLS = 16;
 
-    float* A_gmem_host = new float[M * N];
-    float* A_shared_host = new float[TILE_ROWS * TILE_COLS];
-    float* A_gmem_device;
-    float* A_shared_device;
-    CUDA_CHECK(cudaMalloc(&A_gmem_device, M * N * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&A_shared_device, TILE_ROWS * TILE_COLS * sizeof(float)));
-    CUDA_CHECK(cudaMemset(A_shared_device, 0, TILE_ROWS * TILE_COLS * sizeof(float)));
+    float* src_host = new float[M * N];
+    float* dst_host = new float[M * N];
+    float* src_device;
+    float* dst_device;
+    CUDA_CHECK(cudaMalloc(&src_device, M * N * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&dst_device, M * N * sizeof(float)));
+    CUDA_CHECK(cudaMemset(dst_device, 0, M * N * sizeof(float)));
 
     for (int i = 0; i < M * N; i++)
     {
-        A_gmem_host[i] = i;
+        src_host[i] = i;
     }
 
-    CUDA_CHECK(cudaMemcpy(A_gmem_device, A_gmem_host, M * N * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(src_device, src_host, M * N * sizeof(float), cudaMemcpyHostToDevice));
     const unsigned int yBlocks = 1;
     const unsigned int xBlocks = 1;
     const unsigned int yThreadsPerBlock = 1;
@@ -46,23 +44,24 @@ TEST(TestFp32Utils, TestLoadTileFromGmem)
     dim3 gridDim(xBlocks, yBlocks);
     dim3 blockDim(xThreadsPerBlock, yThreadsPerBlock);
     
-    loadFromGmemKernelWrapper<TILE_ROWS, TILE_COLS, float>
+    printf("running kernel\n");
+    loadFromGmemKernelWrapper<M, N, float>
     <<<gridDim, blockDim>>>(
-        A_gmem_device,
-        A_shared_device,
+        src_device,
+        dst_device,
         N,
-        TILE_COLS
+        N
     );
     CUDA_CHECK(cudaPeekAtLastError());
-    CUDA_CHECK(cudaMemcpy(A_shared_host, A_shared_device, TILE_ROWS * TILE_COLS * sizeof(float), cudaMemcpyDeviceToHost));
-    for (int row = 0; row < TILE_ROWS; row++)
+    CUDA_CHECK(cudaMemcpy(dst_host, dst_device, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+    for (int row = 0; row < M; row++)
     {
-        for (int col = 0; col < TILE_COLS; col++)
+        for (int col = 0; col < N; col++)
         {
-            if (A_shared_host[row * TILE_COLS + col] != A_gmem_host[row * N + col])
+            if (dst_host[row * N + col] != src_host[row * N + col])
             {
-                printf("Expected %f but got %f at row %d, col %d\n", A_gmem_host[row * N + col], A_shared_host[row * TILE_COLS + col], row, col);
-                ASSERT_EQ(A_shared_host[row * TILE_COLS + col], A_gmem_host[row * N + col]);
+                printf("Expected %f but got %f at row %d, col %d\n", src_host[row * N + col], dst_host[row * N + col], row, col);
+                ASSERT_EQ(dst_host[row * N + col], src_host[row * N + col]);
             }
         }
     }

@@ -73,8 +73,6 @@ __global__ void tensorcore_3(half* A,
     }
   }
 
-
-
   // load tile of C into shared memory ahead of time
   tileMemcpy<BM_dim, BN_dim, half>(C + block_m * CD_stride + block_n, CD_shmem_blocktile, CD_stride, CD_shmem_stride);
   
@@ -132,7 +130,7 @@ __global__ void tensorcore_3(half* A,
   {
     for (unsigned int tile_n = 0; tile_n < MMA_TILES_N; tile_n++)
     {
-      const unsigned int CD_tile_index = CD_warp_index + (tile_m * MMA_TILES_M * CD_shmem_stride) + (tile_n * MMA_N_dim);
+      const unsigned int CD_tile_index = CD_warp_index + (tile_m * MMA_M_dim * CD_shmem_stride) + (tile_n * MMA_N_dim);
       wmma::load_matrix_sync(c_frag, CD_shmem_blocktile + CD_tile_index, CD_shmem_stride, wmma::mem_row_major);
       for (int i = 0; i < c_frag.num_elements; i++)
       {

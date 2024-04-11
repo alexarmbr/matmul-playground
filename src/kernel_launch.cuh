@@ -80,9 +80,9 @@ void tensorcore_2_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     constexpr unsigned int WM_dim = 16;
     constexpr unsigned int WN_dim = 16;
     constexpr unsigned int WK_dim = 16;
-    constexpr unsigned int WARPS_PER_BLOCK_M = 2;
-    constexpr unsigned int WARPS_PER_BLOCK_N = 2;
-    constexpr unsigned int WARPS_PER_BLOCK_K = 2;
+    constexpr unsigned int WARPS_PER_BLOCK_M = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_K = 4;
     constexpr unsigned int BM_dim = WM_dim * WARPS_PER_BLOCK_M;
     constexpr unsigned int BN_dim = WN_dim * WARPS_PER_BLOCK_N;
     constexpr unsigned int BK_dim = WK_dim * WARPS_PER_BLOCK_K;
@@ -154,17 +154,17 @@ void tensorcore_3_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     constexpr unsigned int MMA_N_dim = 16;
     constexpr unsigned int MMA_K_dim = 16;
 
-    constexpr unsigned int MMA_TILES_PER_WARP_TILE_M=1;
-    constexpr unsigned int MMA_TILES_PER_WARP_TILE_N=1;
-    constexpr unsigned int MMA_TILES_PER_WARP_TILE_K=4;
+    constexpr unsigned int MMA_TILES_PER_WARP_TILE_M=4;
+    constexpr unsigned int MMA_TILES_PER_WARP_TILE_N=2;
+    constexpr unsigned int MMA_TILES_PER_WARP_TILE_K=1;
 
     constexpr unsigned int WM_dim = MMA_M_dim * MMA_TILES_PER_WARP_TILE_M;
     constexpr unsigned int WN_dim = MMA_N_dim * MMA_TILES_PER_WARP_TILE_N;
     constexpr unsigned int WK_dim = MMA_K_dim * MMA_TILES_PER_WARP_TILE_K;
 
-    constexpr unsigned int WARP_TILES_PER_BLOCK_M = 1;
-    constexpr unsigned int WARP_TILES_PER_BLOCK_N = 1;
-    constexpr unsigned int WARP_TILES_PER_BLOCK_K = 1; // is this needed?
+    constexpr unsigned int WARP_TILES_PER_BLOCK_M = 2;
+    constexpr unsigned int WARP_TILES_PER_BLOCK_N = 2;
+    constexpr unsigned int WARP_TILES_PER_BLOCK_K = 2; // is this needed?
 
     constexpr unsigned int BM_dim = WM_dim * WARP_TILES_PER_BLOCK_M;
     constexpr unsigned int BN_dim = WN_dim * WARP_TILES_PER_BLOCK_N;
@@ -209,31 +209,30 @@ void tensorcore_3_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaPeekAtLastError());
 
-    // if (num_runs != 0)
-    // {
-    //     for (int i = 0; i < num_runs; i++)
-    //     {
-    //         timer.Start();
-    //         tensorcore_3
-    //         <BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim,
-    //         MMA_TILES_PER_WARP_TILE_M, MMA_TILES_PER_WARP_TILE_N, MMA_TILES_PER_WARP_TILE_K>
-    //         <<<gridDim, blockDim>>>(
-    //             device_sgemm_params.A,
-    //             device_sgemm_params.B,
-    //             device_sgemm_params.C,
-    //             device_sgemm_params.D,
-    //             device_sgemm_params.alpha,
-    //             device_sgemm_params.beta,
-    //             M,
-    //             N,
-    //             K
-    //         );
-    //         timer.Stop();
-    //     }
-    //     double gflops_per_sec = timer.logKernelStats(M, N, K);
-    //     std::cout << "Naive TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
-    //     CUDA_CHECK(cudaPeekAtLastError());
-    // }
+    if (num_runs != 0)
+    {
+        for (int i = 0; i < num_runs; i++)
+        {
+            timer.Start();
+            tensorcore_3
+            <BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, MMA_M_dim, MMA_N_dim, MMA_K_dim>
+            <<<gridDim, blockDim>>>(
+                device_sgemm_params.A,
+                device_sgemm_params.B,
+                device_sgemm_params.C,
+                device_sgemm_params.D,
+                device_sgemm_params.alpha,
+                device_sgemm_params.beta,
+                M,
+                N,
+                K
+            );
+            timer.Stop();
+        }
+        double gflops_per_sec = timer.logKernelStats(M, N, K);
+        std::cout << "Warp Tiled TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
+        CUDA_CHECK(cudaPeekAtLastError());
+    }
 
 }
 

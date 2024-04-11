@@ -56,18 +56,21 @@ std::pair<sgemm_params<T>, sgemm_params<T>> sgemm_setup(unsigned int M, unsigned
     // fill host matrices with random elements
     srand(1234);
     for (int i = 0; i < M * N; i++) {
-      C[i] = (T) (i % 10);
+      // C[i] = (T) (i % 10);
       // C[i] = (T)(rand() % 10);
+      C[i] = 1.0;
     }
     for (int i = 0; i < K * N; i++)
     {
-      B[i] = (T) (i % 10);
+      // B[i] = (T) (i % 10);
       // B[i] = (T)(rand() % 10);
+      B[i] = 1.0;
     }
     for (int i = 0; i < M * K; i++)
     {
-      A[i] = (T) (i % 10);
+      // A[i] = (T) (i % 10);
       // A[i] = (T)(rand() % 10);
+      A[i] = 1.0;
     }
     
     // copy to device

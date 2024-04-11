@@ -19,15 +19,24 @@ __device__ void tileMemcpy(
     const unsigned int dst_stride
 )
 {
-    // TODO work on this
+    // assert(row_iterations * column_iterations * blockDim.x == TILE_ROWS * TILE_COLS);
     assert(threadIdx.y == 0);
-    for (unsigned int row = 0; row < TILE_ROWS; row++)
+    
+    const unsigned int row_step = max(1, blockDim.x / TILE_COLS);
+    const unsigned int col_step = blockDim.x;
+    
+    // const unsigned int column_iterations = min(1, TILE_COLS / col_step);
+    // const unsigned int row_iterations = TILE_ROWS / row_step;
+
+    const unsigned int thread_row = threadIdx.x / TILE_COLS;
+    const unsigned int thread_col = threadIdx.x - (thread_row * TILE_COLS);
+    
+    for (unsigned int r = thread_row; r < TILE_ROWS; r+=row_step)
     {
-        for (unsigned int col = threadIdx.x; col < TILE_COLS; col += blockDim.x)
+        for (unsigned int c = thread_col; c < TILE_COLS; c+=col_step)
         {
-            T* thread_src = src + row * src_stride + col;
-            T* thread_dst = dst + row * dst_stride + col;
-            *thread_dst = *thread_src;
+            dst[r * dst_stride + c] =  src[r * src_stride + c];
         }
     }
+    
 }
