@@ -4,6 +4,7 @@
 #include "kernels/tensorcore_2.cuh"
 #include "kernels/tensorcore_3.cuh"
 #include "kernels/memcpy.cuh"
+#include "kernels/tensorcore_16x8x16_fp16.cuh"
 
 #include <cublas_v2.h>
 
@@ -303,6 +304,34 @@ void tensorcore_3_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     }
 
 }
+
+
+void tensorcore_16x8x16_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+{
+    assert(device_sgemm_params.M % 16 == 0);
+    assert(device_sgemm_params.N % 8 == 0);
+    assert(device_sgemm_params.K % 16 == 0);
+    
+    dim3 gridDim(1);
+    dim3 blockDim(32, 1);
+    
+    tensorcore_16x8x16
+    <<<gridDim, blockDim>>>(
+        device_sgemm_params.A,
+        device_sgemm_params.B,
+        device_sgemm_params.C,
+        device_sgemm_params.D,
+        device_sgemm_params.alpha,
+        device_sgemm_params.beta,
+        device_sgemm_params.M,
+        device_sgemm_params.N,
+        device_sgemm_params.K
+    );
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaPeekAtLastError());
+
+}
+
 
 
 

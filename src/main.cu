@@ -64,6 +64,9 @@
             host_sgemm_params.alpha = 0.0f;
             host_sgemm_params.beta = 1.0f;
             memcpy_launch(device_sgemm_params, timer, num_iterations);
+        case 5:
+            tensorcore_16x8x16_launch(device_sgemm_params, timer, num_iterations);
+            break;
     }
     
     if (check_on_cpu) {
