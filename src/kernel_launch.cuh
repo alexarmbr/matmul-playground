@@ -306,16 +306,16 @@ void tensorcore_3_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
 }
 
 
-void tensorcore_16x8x16_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void tensorcore_m16n8k8_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     assert(device_sgemm_params.M % 16 == 0);
     assert(device_sgemm_params.N % 8 == 0);
-    assert(device_sgemm_params.K % 16 == 0);
+    assert(device_sgemm_params.K % 8 == 0);
     
     dim3 gridDim(1);
     dim3 blockDim(32, 1);
     
-    tensorcore_16x8x16
+    tensorcore_m16n8k8
     <<<gridDim, blockDim>>>(
         device_sgemm_params.A,
         device_sgemm_params.B,

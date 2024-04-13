@@ -20,7 +20,7 @@ include_directories(include)
 add_executable(runner src/main.cu)
 target_link_libraries(runner CUDA::cublas)
 # target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
-# target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
+target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 
 add_executable(tests src/test.cu)
 # target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
