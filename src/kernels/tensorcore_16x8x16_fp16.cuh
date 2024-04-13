@@ -29,5 +29,5 @@ __global__ void tensorcore_m16n8k8(half* A,
     tileMemcpy<16, 8, half>(C, C_shared, N, 8);
     __syncthreads();
 
-    mma_m16n8k8(A_shared, B_shared, C_shared, D, alpha, beta, 8, 8, 8, 8);
+    mma_m16n8k8(A_shared, B_shared, C_shared, D, alpha, beta, M, N, K, true);
 }
