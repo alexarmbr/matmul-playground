@@ -21,6 +21,14 @@
   }
 
 
+// generate a random half precision float between LO and HI
+inline half RAND_HALF(float LO = -1.0f, float HI = 1.0f)
+{
+    float r = LO + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(HI-LO)));
+    return (half) r;
+}
+
+
 // struct with generic type
 template <typename T>
 struct sgemm_params
@@ -52,22 +60,21 @@ std::pair<sgemm_params<T>, sgemm_params<T>> sgemm_setup(unsigned int M, unsigned
     CUDA_CHECK(cudaMalloc((void **)&dev_B, K * N * sizeof(T)));
     CUDA_CHECK(cudaMalloc((void **)&dev_C, M * N * sizeof(T)));
     CUDA_CHECK(cudaMalloc((void **)&dev_D, M * N * sizeof(T)));
+    half LO = 0.0f;
+    half HI = 1.0f;
 
     // fill host matrices with random elements
     srand(1234);
     for (int i = 0; i < M * N; i++) {
-      C[i] = (T) i;
-      // C[i] = (T)(rand() % 10);
+      C[i] = RAND_HALF();
     }
     for (int i = 0; i < K * N; i++)
     {
-      B[i] = (T) i;
-      // B[i] = (T)(rand() % 10);
+      B[i] = RAND_HALF();
     }
     for (int i = 0; i < M * K; i++)
     {
-      A[i] = (T) i;
-      // A[i] = (T)(rand() % 10);
+      A[i] = RAND_HALF();
     }
     
     // copy to device
@@ -88,8 +95,8 @@ void host_sgemm(sgemm_params<half> params)
     half *B = params.B;
     half *C = params.C;
     half *D = params.D;
-    float alpha = params.alpha;
-    float beta = params.beta;
+    half alpha = params.alpha;
+    half beta = params.beta;
     unsigned int M = params.M;
     unsigned int N = params.N;
     unsigned int K = params.K;
@@ -99,45 +106,45 @@ void host_sgemm(sgemm_params<half> params)
     for (int n = 0; n < N; n++)
     {
         
-        float acc = 0.0f;
+        half acc = 0.0f;
         for (int k = 0; k < K; k++)
         {
-        acc += (float) (A[m * K + k] * B[k * N + n]);
+        acc += (A[m * K + k] * B[k * N + n]);
         }
-        D[m * N + n] = alpha * acc + (float) ((half) beta * C[m * N + n]);
+        D[m * N + n] = alpha * acc + (beta * C[m * N + n]);
     }
     }
 }
 
-void host_sgemm(sgemm_params<float> params)
-{
-    float *A = params.A;
-    float *B = params.B;
-    float *C = params.C;
-    float *D = params.D;
-    float alpha = params.alpha;
-    float beta = params.beta;
-    unsigned int M = params.M;
-    unsigned int N = params.N;
-    unsigned int K = params.K;
+// void host_sgemm(sgemm_params<float> params)
+// {
+//     float *A = params.A;
+//     float *B = params.B;
+//     float *C = params.C;
+//     float *D = params.D;
+//     float alpha = params.alpha;
+//     float beta = params.beta;
+//     unsigned int M = params.M;
+//     unsigned int N = params.N;
+//     unsigned int K = params.K;
 
-    for (int m = 0; m < M; m++)
-    {
-    for (int n = 0; n < N; n++)
-    {
+//     for (int m = 0; m < M; m++)
+//     {
+//     for (int n = 0; n < N; n++)
+//     {
         
-        float acc = 0.0f;
-        for (int k = 0; k < K; k++)
-        {
-        acc += (float) (A[m * K + k] * B[k * N + n]);
-        }
-        D[m * N + n] = alpha * acc + beta * C[m * N + n];
-    }
-    }
-}
+//         float acc = 0.0f;
+//         for (int k = 0; k < K; k++)
+//         {
+//         acc += (float) (A[m * K + k] * B[k * N + n]);
+//         }
+//         D[m * N + n] = alpha * acc + beta * C[m * N + n];
+//     }
+//     }
+// }
 
 template <typename T>
-bool elementwise_isclose(T* a, T* b, int size, float atol = 1e-5)
+bool elementwise_isclose(T* a, T* b, int size, float atol = 1e-2)
 {
     for (int i = 0; i < size; i++)
     {

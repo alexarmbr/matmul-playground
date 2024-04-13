@@ -34,19 +34,17 @@ __global__ void tensorcore_m16n8k8(half* A,
     __shared__ half A_shared[16 * 8];
     __shared__ half B_shared[8 * 8];
     __shared__ half C_shared[16 * 8];
-    __shared__ half D_shared[16 * 8];
 
     // load A and B into shared memory
     tileMemcpy<16, 8, half>(A, A_shared, K, 8);
     tileMemcpy<8, 8, half>(B, B_shared, N, 8);
     tileMemcpy<16, 8, half>(C, C_shared, N, 8);
+    __syncthreads();
 
     
     // D, A, C are 16x8
-    uint32_t D_register[2];
     uint32_t A_register[2];
     uint32_t C_register[2];
-    uint32_t* smem_ptr_D;
     uint32_t* smem_ptr_A;
     uint32_t* smem_ptr_C;
     {
@@ -54,7 +52,6 @@ __global__ void tensorcore_m16n8k8(half* A,
         const int offset = fragment_row * 4;
         smem_ptr_A = reinterpret_cast<uint32_t*>(A_shared) + offset;
         smem_ptr_C = reinterpret_cast<uint32_t*>(C_shared) + offset;
-        smem_ptr_D = reinterpret_cast<uint32_t*>(D_shared) + offset;
     }
     
     // B is 8x8
@@ -111,6 +108,7 @@ __global__ void tensorcore_m16n8k8(half* A,
     // D[threadIdx.x] = a0;
 
     // compute D = 
+    uint32_t D_register[2];
     asm volatile (
         "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
         " {%0, %1}, " // two registers for D
@@ -122,16 +120,14 @@ __global__ void tensorcore_m16n8k8(half* A,
           "r"(B_register),
           "r"(C_register[0]), "r"(C_register[1])
     );
-
-    // store D
-    uint32_t smem_ptr_D_ = cvta_to_shared_u32(smem_ptr_D);
-    asm volatile (
-        "stmatrix.sync.aligned.m8n8.x2.shared.b16 "
-        "[%0], {%1, %2};"
-        : "=r"(smem_ptr_D_)
-        : "r"(D_register[0]), "r"(D_register[1])
-    );
-
+    
+    uint32_t* gmem_ptr_D = reinterpret_cast<uint32_t*>(D);
+    int fragment_row = threadIdx.x / 4;
+    const int fragment_col = threadIdx.x % 4;
+    gmem_ptr_D[fragment_row * (N/2) + fragment_col] = D_register[0];
+    int fragment_row_2 = fragment_row + 8;
+    gmem_ptr_D[fragment_row_2 * (N/2) + fragment_col] = D_register[1];
+    
 
     // half* D_register_ptr = reinterpret_cast<half*>(D_register);
     // half d0 = D_register_ptr[0];

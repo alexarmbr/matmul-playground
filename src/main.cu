@@ -5,27 +5,8 @@
 
 #include <vector>
 
-// int main(int argc, char **argv) {
-//     bool check_on_cpu = false;
-
-//     KernelLogger timer("Cublas");
-//     std::vector<unsigned int> matrix_dims = {128, 512, 1024, 2048, 4096};
-//     for (unsigned int D : matrix_dims)
-//     {
-//         auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(D, D, D);
-//         cublas_fp16_launch(device_sgemm_params, timer);
-//         if (check_on_cpu) {
-//             sgemm_verify(device_sgemm_params, host_sgemm_params);
-//         }
-//     }
-
-    
-//     return 0;
-//   }
-
-
   int main(int argc, char **argv) {
-    bool check_on_cpu = false;
+    bool check_on_cpu = true;
 
     
     if (argc != 3) {
@@ -44,10 +25,10 @@
     const unsigned int K = 8;
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
-    // device_sgemm_params.alpha = 1.0f;
-    // device_sgemm_params.beta = 0.0f;
-    // host_sgemm_params.alpha = 1.0f;
-    // host_sgemm_params.beta = 0.0f;
+    device_sgemm_params.alpha = 1.0f;
+    device_sgemm_params.beta = 1.0f;
+    host_sgemm_params.alpha = 1.0f;
+    host_sgemm_params.beta = 1.0f;
     switch (kernel_id) {
         case 1:
             tensorcore_1_launch(device_sgemm_params, timer, num_iterations);
@@ -59,9 +40,9 @@
             tensorcore_3_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 4:
-            device_sgemm_params.alpha = 0.0f;
+            device_sgemm_params.alpha = 1.0f;
             device_sgemm_params.beta = 1.0f;
-            host_sgemm_params.alpha = 0.0f;
+            host_sgemm_params.alpha = 1.0f;
             host_sgemm_params.beta = 1.0f;
             memcpy_launch(device_sgemm_params, timer, num_iterations);
         case 5:
