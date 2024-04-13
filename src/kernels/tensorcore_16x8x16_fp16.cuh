@@ -2,18 +2,6 @@
 #include <cuda.h>
 #include "device_utils.cuh"
 
-__device__ __forceinline__ uint32_t cvta_to_shared_u32(const void *pointer) {
-    uint32_t address;
-    asm("{\n\t"
-        "  .reg .u64 u64addr;\n\t"
-        "  cvta.to.shared.u64 u64addr, %1;\n\t"
-        "  cvt.u32.u64 %0, u64addr;\n\t"
-        "}"
-        : "=r"(address)
-        : "l"(pointer));
-    return address;
-  }
-
 __global__ void tensorcore_m16n8k8(half* A,
     half* B,
     half* C,
@@ -41,99 +29,5 @@ __global__ void tensorcore_m16n8k8(half* A,
     tileMemcpy<16, 8, half>(C, C_shared, N, 8);
     __syncthreads();
 
-    
-    // D, A, C are 16x8
-    uint32_t A_register[2];
-    uint32_t C_register[2];
-    uint32_t* smem_ptr_A;
-    uint32_t* smem_ptr_C;
-    {
-        const int fragment_row = threadIdx.x % 16;
-        const int offset = fragment_row * 4;
-        smem_ptr_A = reinterpret_cast<uint32_t*>(A_shared) + offset;
-        smem_ptr_C = reinterpret_cast<uint32_t*>(C_shared) + offset;
-    }
-    
-    // B is 8x8
-    uint32_t B_register;
-    uint32_t* smem_ptr_B;
-    {
-        const int fragment_row = threadIdx.x % 8;
-        const int offset = fragment_row * 4;
-        smem_ptr_B = reinterpret_cast<uint32_t*>(B_shared) + offset;
-    }
-
-    // load A
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x2.shared.b16 "
-        "{%0, %1}, [%2];"
-        : "=r"(A_register[0]), "=r"(A_register[1])
-        : "r"(cvta_to_shared_u32(smem_ptr_A))
-    );
-
-    // load B
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 "
-        "{%0}, [%1];"
-        : "=r"(B_register)
-        : "r"(cvta_to_shared_u32(smem_ptr_B))
-    );
-
-    // load C
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x2.shared.b16 "
-        "{%0, %1}, [%2];"
-        : "=r"(C_register[0]), "=r"(C_register[1])
-        : "r"(cvta_to_shared_u32(smem_ptr_C))
-    );
-    
-    
-    // const int thread_offset = threadIdx.x * 4;
-    // half* A_register_ptr = reinterpret_cast<half*>(A_register);
-    // half* B_register_ptr = reinterpret_cast<half*>(&B_register);
-    // half* C_register_ptr = reinterpret_cast<half*>(C_register);
-
-    // half a0 = A_register_ptr[0];
-    // half a1 = A_register_ptr[1];
-    // half a2 = A_register_ptr[2];
-    // half a3 = A_register_ptr[3];
-    
-    // half b0 = B_register_ptr[0];
-    // half b1 = B_register_ptr[1];
-    
-    // half c0 = C_register_ptr[0];
-    // half c1 = C_register_ptr[1];
-    // half c2 = C_register_ptr[2];
-    // half c3 = C_register_ptr[3];
-    // D[threadIdx.x] = a0;
-
-    // compute D = 
-    uint32_t D_register[2];
-    asm volatile (
-        "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
-        " {%0, %1}, " // two registers for D
-        " {%2, %3}, " // two registers for A
-        " {%4}, " // one registers for B
-        " {%5, %6}; " // two registers for C
-        : "=r"(D_register[0]), "=r"(D_register[1])
-        : "r"(A_register[0]), "r"(A_register[1]),
-          "r"(B_register),
-          "r"(C_register[0]), "r"(C_register[1])
-    );
-    
-    uint32_t* gmem_ptr_D = reinterpret_cast<uint32_t*>(D);
-    int fragment_row = threadIdx.x / 4;
-    const int fragment_col = threadIdx.x % 4;
-    gmem_ptr_D[fragment_row * (N/2) + fragment_col] = D_register[0];
-    int fragment_row_2 = fragment_row + 8;
-    gmem_ptr_D[fragment_row_2 * (N/2) + fragment_col] = D_register[1];
-    
-
-    // half* D_register_ptr = reinterpret_cast<half*>(D_register);
-    // half d0 = D_register_ptr[0];
-    // half d1 = D_register_ptr[1];
-    // D[threadIdx.x] = d0;
+    mma_m16n8k8(A_shared, B_shared, C_shared, D, alpha, beta, 8, 8, 8, 8);
 }
-
-// how many registers for D, A, B, C
-// for thread i, which values need to go to D, A, B, C

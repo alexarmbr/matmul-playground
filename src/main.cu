@@ -25,10 +25,8 @@
     const unsigned int K = 8;
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
-    device_sgemm_params.alpha = 1.0f;
-    device_sgemm_params.beta = 1.0f;
-    host_sgemm_params.alpha = 1.0f;
-    host_sgemm_params.beta = 1.0f;
+    // device_sgemm_params.beta = 1.0f;
+    // host_sgemm_params.beta = 1.0f;
     switch (kernel_id) {
         case 1:
             tensorcore_1_launch(device_sgemm_params, timer, num_iterations);
@@ -39,13 +37,16 @@
         case 3:
             tensorcore_3_launch(device_sgemm_params, timer, num_iterations);
             break;
-        case 4:
+        
+        
+        
+        case 9:
             device_sgemm_params.alpha = 1.0f;
             device_sgemm_params.beta = 1.0f;
             host_sgemm_params.alpha = 1.0f;
             host_sgemm_params.beta = 1.0f;
             memcpy_launch(device_sgemm_params, timer, num_iterations);
-        case 5:
+        case 10:
             tensorcore_m16n8k8_launch(device_sgemm_params, timer, num_iterations);
             break;
     }
