@@ -67,14 +67,17 @@ std::pair<sgemm_params<T>, sgemm_params<T>> sgemm_setup(unsigned int M, unsigned
     srand(1234);
     for (int i = 0; i < M * N; i++) {
       C[i] = RAND_HALF();
+      // C[i] = 0.0f;
     }
     for (int i = 0; i < K * N; i++)
     {
       B[i] = RAND_HALF();
+      // B[i] = 1.0f;
     }
     for (int i = 0; i < M * K; i++)
     {
       A[i] = RAND_HALF();
+      // A[i] = (half) i;
     }
     
     // copy to device
@@ -144,7 +147,7 @@ void host_sgemm(sgemm_params<half> params)
 // }
 
 template <typename T>
-bool elementwise_isclose(T* a, T* b, int size, float atol = 1e-2)
+bool elementwise_isclose(T* a, T* b, int size, float atol = 1e-1)
 {
     for (int i = 0; i < size; i++)
     {

@@ -58,9 +58,10 @@ __device__ __forceinline__ uint32_t cvta_to_shared_u32(const void *pointer) {
 __device__ __forceinline__ void ldmatrix_m16n8(
     half* shmem,
     half (&reg)[4],
-    const unsigned int shmem_stride_bytes
+    unsigned int shmem_stride_bytes
 )
 {
+    shmem_stride_bytes /= sizeof(uint32_t);
     uint32_t (&reg_) [2] = reinterpret_cast<uint32_t(&)[2]>(reg);
     constexpr int frag_M_dim = 16;
     const unsigned int fragment_row = threadIdx.x % frag_M_dim;
@@ -78,9 +79,10 @@ __device__ __forceinline__ void ldmatrix_m16n8(
 __device__ __forceinline__ void ldmatrix_n8k8(
     half* shmem,
     half (&reg)[2],
-    const unsigned int shmem_stride_bytes
+    unsigned int shmem_stride_bytes
 )
 {
+    shmem_stride_bytes /= sizeof(uint32_t);
     uint32_t &reg_ = reinterpret_cast<uint32_t&>(reg);
     constexpr int frag_K_dim = 8;
     const unsigned int fragment_row = threadIdx.x % frag_K_dim;
@@ -120,6 +122,26 @@ __device__ __forceinline__ void mma_sync_m16n8k8(
     );
 }
 
+// the stmatrix ptx instruction works for sm_90 and above
+// this is a workaround
+__device__ __forceinline__ void stmatrix_m16n8(
+    half* dst,
+    half (&reg)[4],
+    unsigned int dst_stride_bytes
+)
+{
+    const unsigned int laneIdx = threadIdx.x % 32;
+    uint32_t (&reg_) [2] = reinterpret_cast<uint32_t(&)[2]>(reg);
+    uint32_t* dst_ptr = reinterpret_cast<uint32_t*>(dst);
+    dst_stride_bytes /= sizeof(uint32_t);
+    unsigned int fragment_row = laneIdx / 4;
+    const unsigned int fragment_col = laneIdx % 4;
+    dst_ptr[fragment_row * dst_stride_bytes + fragment_col] = reg_[0];
+    fragment_row += 8;
+    dst_ptr[fragment_row * dst_stride_bytes + fragment_col] = reg_[1];
+}
+
+
 
 
 
@@ -141,12 +163,12 @@ __device__ __forceinline__ void mma_m16n8k8(
     bool accumulate_C
 )
 {
-    constexpr unsigned int WARP_SIZE = 32;
-    const unsigned int laneIdx = threadIdx.x % WARP_SIZE;
-
     // B is 8x8
     half B_register[2];
-    ldmatrix_n8k8(B_shared, B_register, N / 2);
+    const unsigned int A_shared_stride_bytes = K * sizeof(half);
+    const unsigned int B_shared_stride_bytes = N * sizeof(half);
+    const unsigned int CD_shared_stride_bytes = N * sizeof(half);
+    ldmatrix_n8k8(B_shared, B_register, B_shared_stride_bytes);
 
     // scale B by alpha
     half* B_register_half = reinterpret_cast<half*>(&B_register);
@@ -157,8 +179,8 @@ __device__ __forceinline__ void mma_m16n8k8(
     half A_register[4];
     half C_register[4];
 
-    ldmatrix_m16n8(C_shared, C_register, K / 2);
-    ldmatrix_m16n8(A_shared, A_register, K / 2);
+    ldmatrix_m16n8(C_shared, C_register, CD_shared_stride_bytes);
+    ldmatrix_m16n8(A_shared, A_register, A_shared_stride_bytes);
 
     if (accumulate_C) {
         C_register[0] *= beta;
@@ -169,16 +191,9 @@ __device__ __forceinline__ void mma_m16n8k8(
     
 
     // compute D
-    half D_register[4];
-    mma_sync_m16n8k8(D_register, A_register, B_register, C_register);
+    // half D_register[4];
+    mma_sync_m16n8k8(C_register, A_register, B_register, C_register);
     
-    // TODO rewrite ptr arithmetic for half precision
-    
-    // uint32_t* gmem_ptr_D = reinterpret_cast<uint32_t*>(D);
-    // int fragment_row = laneIdx / 4;
-    // const int fragment_col = laneIdx % 4;
-    // gmem_ptr_D[fragment_row * 4 + fragment_col] = D_register[0];
-    // int fragment_row_2 = fragment_row + 8;
-    // gmem_ptr_D[fragment_row_2 * 4 + fragment_col] = D_register[1];
+    stmatrix_m16n8(D, C_register, CD_shared_stride_bytes);
 }
 
