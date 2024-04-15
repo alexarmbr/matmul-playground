@@ -23,7 +23,6 @@ __global__ void tensorcore_4(half* A,
   constexpr unsigned int WM_dim = 16;
   constexpr unsigned int WN_dim = 8;
   constexpr unsigned int WK_dim = 8;
-  const unsigned int laneIdx = threadIdx.x % 32;
 
   static_assert(BM_dim % WM_dim == 0);
   static_assert(BN_dim % WN_dim == 0);
@@ -32,8 +31,8 @@ __global__ void tensorcore_4(half* A,
   const unsigned int A_stride_elements = K;
   const unsigned int B_stride_elements = N;
   const unsigned int CD_stride_elements = N;
-  const unsigned int A_stride_bytes = K * sizeof(half);
-  const unsigned int B_stride_bytes = N * sizeof(half);
+  // const unsigned int A_stride_bytes = K * sizeof(half);
+  // const unsigned int B_stride_bytes = N * sizeof(half);
   const unsigned int CD_stride_bytes = N * sizeof(half);
   
   // top left coords of the block tile
