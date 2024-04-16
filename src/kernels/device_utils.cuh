@@ -2,6 +2,48 @@
 #include <cuda.h>
 
 
+
+__device__ void tileMemcpySwizzle(
+    half* src,
+    half* dst,
+    const unsigned int src_stride_bytes,
+    const unsigned int dst_stride_bytes
+)
+{
+    // one row contains 64 halfs, 128 bytes, 32 words
+    // so all values in each column fall on the same memory bank
+    constexpr unsigned int TILE_COLS = 64;
+    float4* src_float4 = reinterpret_cast<float4*>(src);
+    float4* dst_float4 = reinterpret_cast<float4*>(dst);
+    const unsigned int src_stride_float4 = src_stride_bytes / sizeof(float4);
+    const unsigned int dst_stride_float4 = dst_stride_bytes / sizeof(float4);
+
+    const unsigned int lane = threadIdx.x % 32;
+    const unsigned int src_col = lane % 8;
+    const unsigned int src_row = lane / 8;
+    const unsigned int src_index = src_row * src_stride_float4 + src_col;
+
+    const unsigned int dst_row = (src_col & 1) | ((src_col >> 1) & 2);
+    const unsigned int dst_col = ((src_col << 1) & 4) | (src_row ^ dst_row);
+    dst[dst_row * dst_stride_float4 + dst_col] = src[src_row * src_stride_float4 + src_col];
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // load TILE_ROWS * TILE_COLS from src into dst
 // assumes 1d theadblock, i.e. threadIdx.y always equals 0
 // iterations is the # of times we need to iterate, passed
