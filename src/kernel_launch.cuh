@@ -6,7 +6,7 @@
 #include "kernels/tensorcore_4.cuh"
 #include "kernels/memcpy.cuh"
 #include "kernels/tensorcore_16x8x16_fp16.cuh"
-#include "kernels/tensorcore_128x128x128.cuh"
+#include "kernels/tensorcore_64x64x64.cuh"
 
 #include <cublas_v2.h>
 
@@ -334,16 +334,16 @@ void tensorcore_m16n8k8_launch(sgemm_params<half> device_sgemm_params, KernelLog
 
 }
 
-void tensorcore_m128n128k128_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void tensorcore_m64n64k64_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
-    assert(device_sgemm_params.M == 128);
-    assert(device_sgemm_params.N == 128);
-    assert(device_sgemm_params.K == 128);
+    assert(device_sgemm_params.M == 64);
+    assert(device_sgemm_params.N == 64);
+    assert(device_sgemm_params.K == 64);
     
     dim3 gridDim(1);
     dim3 blockDim(32, 1);
     
-    tensorcore_m128n128k128
+    tensorcore_m64n64k64
     <<<gridDim, blockDim>>>(
         device_sgemm_params.A,
         device_sgemm_params.B,

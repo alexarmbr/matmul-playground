@@ -20,9 +20,9 @@
     const unsigned int num_iterations = std::stoi(argv[2]);
 
     KernelLogger timer(timer_name);
-    const unsigned int M = 128;
-    const unsigned int N = 128;
-    const unsigned int K = 128;
+    const unsigned int M = 64;
+    const unsigned int N = 64;
+    const unsigned int K = 64;
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
     // device_sgemm_params.beta = 1.0f;
@@ -55,7 +55,7 @@
             tensorcore_m16n8k8_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 10:
-            tensorcore_m128n128k128_launch(device_sgemm_params, timer, num_iterations);
+            tensorcore_m64n64k64_launch(device_sgemm_params, timer, num_iterations);
             break;
     }
     

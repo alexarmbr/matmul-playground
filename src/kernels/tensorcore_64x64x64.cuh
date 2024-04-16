@@ -2,7 +2,7 @@
 #include <cuda.h>
 #include "device_utils.cuh"
 
-__global__ void tensorcore_m128n128k128(half* A,
+__global__ void tensorcore_m64n64k64(half* A,
     half* B,
     half* C,
     half* D,
@@ -15,16 +15,18 @@ __global__ void tensorcore_m128n128k128(half* A,
     // 1d block, 1 warp
     assert(blockDim.x == 32);
     assert(threadIdx.y == 0);
-    assert(M == 128);
-    assert(N == 128);
-    assert(K == 128);
+    assert(M == 64);
+    assert(N == 64);
+    assert(K == 64);
 
-    __shared__ half A_shared[128 * 128];
-    __shared__ half B_shared[128 * 128];
-    __shared__ half C_shared[128 * 128];
+    __shared__ half A_shared[64 * 64];
+    __shared__ half B_shared[64 * 64];
+    __shared__ half C_shared[64 * 64];
 
     // load A and B into shared memory
-    tileMemcpySwizzle(A, A_shared, K * sizeof(half), K * sizeof(half));
+    tileMemcpySwizzle(A, A_shared, K * sizeof(half), K * sizeof(half), 64);
+    tileMemcpySwizzle(B, B_shared, N * sizeof(half), N * sizeof(half), 64);
+    tileMemcpySwizzle(C, C_shared, N * sizeof(half), N * sizeof(half), 64);
     __syncthreads();
 
     // B is 8x8
