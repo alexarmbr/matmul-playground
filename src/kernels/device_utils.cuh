@@ -25,7 +25,6 @@ __device__ void tileMemcpySwizzle(
     const unsigned int lane = threadIdx.x % 32;
     const unsigned int src_col = lane % 8;
     unsigned int src_row = lane / 8;
-    const unsigned int src_index = src_row * src_stride_float4 + src_col;
 
     unsigned int dst_row = (src_col & 1) | ((src_col >> 1) & 2);
     const unsigned int dst_col = ((src_col << 1) & 4) | (src_row ^ dst_row);
@@ -39,19 +38,46 @@ __device__ void tileMemcpySwizzle(
 }
 
 
+// copy from a tile of shape (row, col) to a tile of shape (col, row)
+template<unsigned int TILE_ROWS,
+unsigned int TILE_COLS>
+__device__ void tileMemcpyTranspose(
+    half* src,
+    half* dst,
+    const unsigned int src_stride_bytes,
+    const unsigned int dst_stride_bytes
+)
+{
+    // copy/transpose is performed in 16x16 tiles
+    // reading 2 rows of 8 halfs each == 2x16 bytes is the smallest chunk
+    // of global memory we can read without wasting any bandwidth
+    // a 16x16 tile (128 bytes) can be written to a row of shmem with 0 bank conflicts
+    static_assert(TILE_COLS % 16 == 0);
+    static_assert(TILE_ROWS % 16 == 0);
+    assert(src_stride_bytes % (TILE_COLS * sizeof(half)) == 0);
+    assert(dst_stride_bytes % (TILE_ROWS * sizeof(half)) == 0);
+    assert(blockDim.x == 32);
+    assert(blockDim.y == 1);
 
+    float4* src_float4 = reinterpret_cast<float4*>(src);
+    float4* dst_float4 = reinterpret_cast<float4*>(dst);
+    const unsigned int src_stride_float4 = src_stride_bytes / sizeof(float4);
+    const unsigned int dst_stride_float4 = TILE_ROWS;
+    constexpr unsigned int tile_cols_float4 = TILE_COLS / (sizeof(float4) / sizeof(half));
 
-
-
-
-
-
-
-
-
-
-
-
+    // adjacent threads go down rows, do two columns at a time
+    unsigned int src_row = threadIdx.x % (blockDim.x / 2);
+    while (src_row < TILE_ROWS)
+    {
+        unsigned int src_col = (threadIdx.x % 32) / 16;
+        while (src_col < tile_cols_float4)
+        {
+            dst_float4[src_col * dst_stride_float4 + src_row] = src_float4[src_row * src_stride_float4 + src_col];
+            src_col += 2;
+        }
+        src_row += 16;
+    }
+}
 
 
 // load TILE_ROWS * TILE_COLS from src into dst

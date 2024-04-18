@@ -71,8 +71,8 @@ std::pair<sgemm_params<T>, sgemm_params<T>> sgemm_setup(unsigned int M, unsigned
     }
     for (int i = 0; i < K * N; i++)
     {
-      B[i] = RAND_HALF();
-      // B[i] = 1.0f;
+      // B[i] = RAND_HALF();
+      B[i] = (half) i;
     }
     for (int i = 0; i < M * K; i++)
     {
