@@ -214,13 +214,33 @@ __device__ __forceinline__ void stmatrix_m16n8(
     dst_stride_bytes /= sizeof(uint32_t);
     unsigned int fragment_row = laneIdx / 4;
     const unsigned int fragment_col = laneIdx % 4;
+    
+    // 4 adjacent threads storing 4 bytes each == 16 byte transactions
     dst_ptr[fragment_row * dst_stride_bytes + fragment_col] = reg_[0];
     fragment_row += 8;
     dst_ptr[fragment_row * dst_stride_bytes + fragment_col] = reg_[1];
 }
 
-
-
+// the stmatrix ptx instruction works for sm_90 and above
+// this is a workaround
+__device__ __forceinline__ void ldmatrix_m16n8_gmem(
+    half* src,
+    half (&reg)[4],
+    unsigned int src_stride_bytes
+)
+{
+    const unsigned int laneIdx = threadIdx.x % 32;
+    uint32_t (&reg_) [2] = reinterpret_cast<uint32_t(&)[2]>(reg);
+    uint32_t* src_ptr = reinterpret_cast<uint32_t*>(src);
+    src_stride_bytes /= sizeof(uint32_t);
+    unsigned int fragment_row = laneIdx / 4;
+    const unsigned int fragment_col = laneIdx % 4;
+    
+    // 4 adjacent threads storing 4 bytes each == 16 byte transactions
+    reg_[0] = src_ptr[fragment_row * src_stride_bytes + fragment_col];
+    fragment_row += 8;
+    reg_[1] = src_ptr[fragment_row * src_stride_bytes + fragment_col];
+}
 
 
 // a warp does a single mma operation with A,B,C coming from shared memory

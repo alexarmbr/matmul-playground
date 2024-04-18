@@ -20,9 +20,9 @@
     const unsigned int num_iterations = std::stoi(argv[2]);
 
     KernelLogger timer(timer_name);
-    const unsigned int M = 32;
-    const unsigned int N = 16;
-    const unsigned int K = 16;
+    const unsigned int M = 128;
+    const unsigned int N = 128;
+    const unsigned int K = 64;
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
     // device_sgemm_params.beta = 1.0f;
@@ -38,23 +38,19 @@
             tensorcore_3_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 4:
-            // device_sgemm_params.alpha = 1.0f;
-            // device_sgemm_params.beta = 0.7f;
-            // host_sgemm_params.alpha = 1.0f;
-            // host_sgemm_params.beta = 0.7f;
             tensorcore_4_launch(device_sgemm_params, timer, num_iterations);
             break;
         
         case 8:
-            device_sgemm_params.alpha = 1.0f;
-            device_sgemm_params.beta = 1.0f;
-            host_sgemm_params.alpha = 1.0f;
-            host_sgemm_params.beta = 1.0f;
             memcpy_launch(device_sgemm_params, timer, num_iterations);
         case 9:
             tensorcore_m16n8k8_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 10:
+            // device_sgemm_params.alpha = 1.0f;
+            // device_sgemm_params.beta = 0.0f;
+            // host_sgemm_params.alpha = 1.0f;
+            // host_sgemm_params.beta = 0.0f;
             tensorcore_tile_launch(device_sgemm_params, timer, num_iterations);
             break;
     }
