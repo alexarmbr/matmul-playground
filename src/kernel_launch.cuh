@@ -337,7 +337,7 @@ void tensorcore_m16n8k8_launch(sgemm_params<half> device_sgemm_params, KernelLog
 void tensorcore_tile_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     dim3 gridDim(1);
-    dim3 blockDim(32, 1);
+    dim3 blockDim(64, 1);
     
     tensorcore_tile
     <<<gridDim, blockDim>>>(

@@ -47,10 +47,10 @@
             tensorcore_m16n8k8_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 10:
-            // device_sgemm_params.alpha = 1.0f;
-            // device_sgemm_params.beta = 0.0f;
-            // host_sgemm_params.alpha = 1.0f;
-            // host_sgemm_params.beta = 0.0f;
+            // device_sgemm_params.alpha = 0.0f;
+            // device_sgemm_params.beta = 1.0f;
+            // host_sgemm_params.alpha = 0.0f;
+            // host_sgemm_params.beta = 1.0f;
             tensorcore_tile_launch(device_sgemm_params, timer, num_iterations);
             break;
     }
