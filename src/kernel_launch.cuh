@@ -4,6 +4,7 @@
 #include "kernels/tensorcore_2.cuh"
 #include "kernels/tensorcore_3.cuh"
 #include "kernels/tensorcore_4.cuh"
+#include "kernels/tensorcore_5.cuh"
 #include "kernels/memcpy.cuh"
 #include "kernels/tensorcore_16x8x16_fp16.cuh"
 #include "kernels/tensorcore_tile.cuh"
@@ -356,11 +357,6 @@ void tensorcore_tile_launch(sgemm_params<half> device_sgemm_params, KernelLogger
 }
 
 
-
-
-
-
-
 void tensorcore_4_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     constexpr unsigned int WM_dim = 16;
@@ -431,6 +427,89 @@ void tensorcore_4_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
         CUDA_CHECK(cudaPeekAtLastError());
     }
 }
+
+
+
+void tensorcore_5_launch(sgemm_params<half> device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+{
+    
+    constexpr unsigned int BM_dim = 128;
+    constexpr unsigned int BN_dim = 128;
+    constexpr unsigned int BK_dim = 64;
+    
+    constexpr unsigned int MMA_M_dim = 16;
+    constexpr unsigned int MMA_N_dim = 8;
+    constexpr unsigned int MMA_K_dim = 8;
+    
+    constexpr unsigned int WARPS_PER_BLOCK_M = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_K = 1;
+
+    constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
+    constexpr unsigned int WN_dim = BM_dim / WARPS_PER_BLOCK_N;
+    constexpr unsigned int WK_dim = BK_dim / WARPS_PER_BLOCK_K;
+
+    const unsigned int M = device_sgemm_params.M;
+    const unsigned int N = device_sgemm_params.N;
+    const unsigned int K = device_sgemm_params.K;
+
+    assert(M % BM_dim == 0);
+    assert(N % BN_dim == 0);
+    assert(K % BK_dim == 0);
+    
+    constexpr unsigned int WARP_SIZE = 32;
+    const unsigned int BlocksM = M / BM_dim;
+    const unsigned int BlocksN = N / BN_dim;
+    const unsigned int ThreadsM = 1;
+    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N;
+
+    dim3 gridDim(BlocksN, BlocksM);
+    dim3 blockDim(ThreadsN, ThreadsM);
+
+    tensorcore_5
+    <BM_dim, BN_dim, BK_dim,
+    WM_dim, WN_dim, WK_dim>
+    <<<gridDim, blockDim>>>(
+        device_sgemm_params.A,
+        device_sgemm_params.B,
+        device_sgemm_params.C,
+        device_sgemm_params.D,
+        device_sgemm_params.alpha,
+        device_sgemm_params.beta,
+        M,
+        N,
+        K
+    );
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaPeekAtLastError());
+
+    if (num_runs != 0)
+    {
+        for (int i = 0; i < num_runs; i++)
+        {
+            timer.Start();
+            tensorcore_5
+            <BM_dim, BN_dim, BK_dim,
+            WM_dim, WN_dim, WK_dim>
+            <<<gridDim, blockDim>>>(
+                device_sgemm_params.A,
+                device_sgemm_params.B,
+                device_sgemm_params.C,
+                device_sgemm_params.D,
+                device_sgemm_params.alpha,
+                device_sgemm_params.beta,
+                M,
+                N,
+                K
+            );
+            timer.Stop();
+        }
+        double gflops_per_sec = timer.logKernelStats(M, N, K);
+        std::cout << "mma TensorCore: " << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
+        CUDA_CHECK(cudaPeekAtLastError());
+    }
+}
+
 
 
 

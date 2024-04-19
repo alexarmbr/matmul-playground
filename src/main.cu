@@ -6,7 +6,7 @@
 #include <vector>
 
   int main(int argc, char **argv) {
-    bool check_on_cpu = true;
+    bool check_on_cpu = false;
 
     
     if (argc != 3) {
@@ -20,9 +20,10 @@
     const unsigned int num_iterations = std::stoi(argv[2]);
 
     KernelLogger timer(timer_name);
-    const unsigned int M = 128;
-    const unsigned int N = 128;
-    const unsigned int K = 64;
+    const unsigned int M = 4096;
+    const unsigned int N = 4096;
+    const unsigned int K = 4096;
+    
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
     // device_sgemm_params.beta = 1.0f;
@@ -39,6 +40,11 @@
             break;
         case 4:
             tensorcore_4_launch(device_sgemm_params, timer, num_iterations);
+            break;
+        case 5:
+            device_sgemm_params.alpha = 0.0f;
+            host_sgemm_params.alpha = 0.0f;
+            tensorcore_5_launch(device_sgemm_params, timer, num_iterations);
             break;
         
         case 8:
