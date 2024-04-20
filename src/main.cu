@@ -14,7 +14,6 @@
         return 1;
     }
 
-
     const unsigned int kernel_id = std::stoi(argv[1]);
     std::string timer_name = "kernel_" + std::to_string(kernel_id);
     const unsigned int num_iterations = std::stoi(argv[2]);
@@ -46,6 +45,9 @@
             // host_sgemm_params.alpha = 0.0f;
             tensorcore_5_launch(device_sgemm_params, timer, num_iterations);
             break;
+        case 6:
+            tensorcore_6_launch(device_sgemm_params, timer, num_iterations);
+            break;
         
         case 8:
             memcpy_launch(device_sgemm_params, timer, num_iterations);
@@ -58,6 +60,9 @@
             // host_sgemm_params.alpha = 0.0f;
             // host_sgemm_params.beta = 1.0f;
             tensorcore_tile_launch(device_sgemm_params, timer, num_iterations);
+            break;
+        case 11:
+            cublas_fp16_launch(device_sgemm_params, timer, num_iterations);
             break;
     }
     

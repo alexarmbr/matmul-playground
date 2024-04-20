@@ -81,67 +81,81 @@ __device__ void tileMemcpyTranspose(
 }
 
 // copy from a tile of shape (row, col) to a tile of shape (col, row)
-template<unsigned int TILE_ROWS,
-unsigned int TILE_COLS,
-unsigned int MMA_TILE_ROWS,
-unsigned int MMA_TILE_COLS>
-__device__ void tileMemcpyTranspose2(
-    half* src,
-    half* dst,
-    const unsigned int src_stride_bytes,
-    const unsigned int dst_stride_bytes
-)
-{
+// template<unsigned int TILE_ROWS,
+// unsigned int TILE_COLS,
+// unsigned int MMA_TILE_ROWS,
+// unsigned int MMA_TILE_COLS>
+// __device__ void tileMemcpyTranspose2(
+//     half* src,
+//     half* dst,
+//     const unsigned int src_stride_bytes,
+//     const unsigned int dst_stride_bytes
+// )
+// {
+
+//     constexpr unsigned int TILE_ROWS_ = TILE_ROWS;
+//     constexpr unsigned int TILE_COLS_ = TILE_COLS;
+//     constexpr unsigned int MMA_TILE_ROWS_ = MMA_TILE_ROWS;
+//     constexpr unsigned int MMA_TILE_COLS_ = MMA_TILE_COLS;
     
-    constexpr unsigned int WARP_TILE_ROWS = 16;
+//     constexpr unsigned int WARP_TILE_ROWS = 16;
+//     constexpr unsigned int WARP_TILE_COLS_FLOAT4 = 2;
+//     constexpr unsigned int MMA_TILE_COLS_FLOAT4 = MMA_TILE_COLS / 8;
+//     constexpr unsigned int TILE_COLS_FLOAT4 = TILE_COLS / 8;
+//     assert(blockDim.y == 1);
+//     assert(MMA_TILE_COLS_FLOAT4 == 1);
+//     assert(TILE_ROWS % WARP_TILE_ROWS == 0);
 
-    constexpr unsigned int WARP_TILE_COLS_FLOAT4 = 2;
-    constexpr unsigned int MMA_TILE_COLS_FLOAT4 = MMA_TILE_COLS / 8;
-    constexpr unsigned int TILE_COLS_FLOAT4 = TILE_COLS / 8;
-    assert(blockDim.y == 1);
-    assert(MMA_TILE_COLS_FLOAT4 == 1)
-    assert(TILE_ROWS % WARP_TILE_ROWS == 0);
-
-    float4* src_float4 = reinterpret_cast<float4*>(src);
-    float4* dst_float4 = reinterpret_cast<float4*>(dst);
-    const unsigned int src_stride_float4 = src_stride_bytes / sizeof(float4);
-    const unsigned int dst_stride_float4 = dst_stride_bytes / sizeof(float4);
+//     float4* src_float4 = reinterpret_cast<float4*>(src);
+//     float4* dst_float4 = reinterpret_cast<float4*>(dst);
+//     const unsigned int src_stride_float4 = src_stride_bytes / sizeof(float4);
+//     const unsigned int dst_stride_float4 = dst_stride_bytes / sizeof(float4);
     
-    // each warp handles 2 (16x8) tiles per step
-    constexpr unsigned int num_warp_tiles_column = TILE_COLS_FLOAT4 / WARP_TILE_COLS_FLOAT4;
-    constexpr unsigned int num_warp_tiles_row = TILE_ROWS / WARP_TILE_ROWS;
+//     // each warp handles 2 (16x8) tiles per step
+//     constexpr unsigned int num_warp_tiles_column = TILE_COLS_FLOAT4 / WARP_TILE_COLS_FLOAT4;
+//     constexpr unsigned int num_warp_tiles_row = TILE_ROWS / WARP_TILE_ROWS;
 
-    const unsigned int warp_idx = threadIdx.x / 32;
-    const unsigned int warp_row_idx = warp_idx / num_warp_tiles_column;
-    const unsigned int warp_col_idx = warp_idx % num_warp_tiles_column;
-    // relative to block tile
-    const unsigned int warp_row = warp_row_idx * WARP_TILE_ROWS;
-    const unsigned int warp_col = warp_col_idx * WARP_TILE_COLS;
+//     const unsigned int warp_idx = threadIdx.x / 32;
+//     const unsigned int warp_row_idx = warp_idx / num_warp_tiles_column;
+//     const unsigned int warp_col_idx = warp_idx % num_warp_tiles_column;
+    
+//     // relative to block tile
+//     const unsigned int warp_row = warp_row_idx * WARP_TILE_ROWS;
+//     const unsigned int warp_col = warp_col_idx * WARP_TILE_COLS_FLOAT4;
 
-    const unsigned int thread_lane = threadIdx.x % 32;
-    const unsigned int thread_row = lane % 16;
-    const unsigned int thread_col = lane / 16;
-    const unsigned int mma_tile_row = (thread_row / MMA_TILE_ROWS) * MMA_TILE_ROWS; 
-    const unsigned int mma_tile_col = thread_col;
+//     const unsigned int thread_lane = threadIdx.x % 32;
+//     const unsigned int thread_row = thread_lane % 16;
+//     const unsigned int thread_col = thread_lane / 16;
 
-    // how many times do we need to advance threads across columns/rows
-    constexpr unsigned int col_steps = TILE_COLS_FLOAT4 / (blockDim.x / WARP_TILE_COLS);
-    constexpr unsigned int row_steps = TILE_ROWS / (blockDim.x / WARP_TILE_ROWS);
+//     // relative to warp tile
+//     const unsigned int mma_tile_row = (thread_row / MMA_TILE_ROWS) * MMA_TILE_ROWS; 
+//     const unsigned int mma_tile_col = thread_col;
 
-    for (unsigned int row = 0; row < row_steps; row++)
-    {
-        for (unsigned int col = 0; col < col_steps; col++)
-        {
-
-        }
-    }
-
-}
-
- 
-
-
-
+//     // how many columns does the warp span
+//     const unsigned int float4_columns_per_block = blockDim.x / 16;
+//     const unsigned int rows_per_block = WARP_TILE_ROWS / ((float4_columns_per_block + TILE_COLS_FLOAT4 - 1) / TILE_COLS_FLOAT4);
+//     const unsigned int dst_rows_per_block = rows_per_block / 16;
+    
+//     // how many times do we need to advance threads across columns/rows
+//     unsigned int current_src_row = warp_row + thread_row;
+//     unsigned int current_dst_row = warp_row_idx * (WARP_TILE_ROWS / MMA_TILE_ROWS) + (thread_row / MMA_TILE_ROWS);
+//     const unsigned int dst_row_stride = TILE_COLS_FLOAT4 * 8;
+//     const unsigned int dst_col_stride = 8;
+//     while (current_src_row < TILE_ROWS)
+//     {
+//         unsigned int current_src_col = warp_col + thread_col;
+//         unsigned int current_dst_col = current_src_col;
+//         while (current_src_col < TILE_COLS_FLOAT4)
+//         {
+//             dst_float4[current_dst_row * dst_row_stride + current_dst_col * dst_col_stride] = \
+//             src_float4[current_src_row * src_stride_float4 + current_src_col];
+//             current_src_col += float4_columns_per_block;
+//             current_dst_col += float4_columns_per_block;
+//         }
+//         current_src_row += rows_per_block;
+//         current_dst_row += dst_rows_per_block;
+//     }
+// }
 
 
 

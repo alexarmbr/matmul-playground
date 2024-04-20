@@ -13,7 +13,7 @@ unsigned int WM_dim,
 unsigned int WN_dim,
 unsigned int WK_dim>
 __global__ void
-tensorcore_5(half* A,
+tensorcore_6(half* A,
   half* B,
   half* C,
   half* D,
@@ -40,8 +40,8 @@ tensorcore_5(half* A,
   const unsigned int A_stride_elements = K;
   const unsigned int B_stride_elements = N;
   const unsigned int CD_stride_elements = N;
-  // const unsigned int A_stride_bytes = K * sizeof(half);
-  // const unsigned int B_stride_bytes = N * sizeof(half);
+  const unsigned int A_stride_bytes = K * sizeof(half);
+  const unsigned int B_stride_bytes = N * sizeof(half);
   // const unsigned int CD_stride_bytes = N * sizeof(half);
   
   // top left coords of the block tile
@@ -50,10 +50,10 @@ tensorcore_5(half* A,
   
   // top left coords of a warp tile, relative to the block tile its in
   const unsigned int warp_index = threadIdx.x / WARP_SIZE;
-  const unsigned int warp_tile_m = warp_index / warps_per_block_n;
-  const unsigned int warp_tile_n = warp_index % warps_per_block_n;
-  const unsigned int warp_m = warp_tile_m * WM_dim;
-  const unsigned int warp_n = warp_tile_n * WN_dim;
+  const unsigned int warp_m_ind = warp_index / warps_per_block_n;
+  const unsigned int warp_n_ind = warp_index % warps_per_block_n;
+  const unsigned int warp_m = warp_m_ind * WM_dim;
+  const unsigned int warp_n = warp_n_ind * WN_dim;
 
   // declare shared memory tiles for caching matrix tiles at block level
   extern __shared__ half shmem[];
@@ -93,27 +93,21 @@ tensorcore_5(half* A,
     // load in current tile of A,B along K dimension
     const unsigned int A_block_tile_index = block_m * A_stride_elements + block_k;
     const unsigned int B_block_tile_index = block_k * B_stride_elements + block_n;
-    tileMemcpy<BM_dim, BK_dim, half>(A + A_block_tile_index, A_shmem_blocktile, A_stride_elements, A_shmem_stride_elements);
-    tileMemcpy<BK_dim, BN_dim, half>(B + B_block_tile_index, B_shmem_blocktile, B_stride_elements, B_shmem_stride_elements);
-    // tileMemcpyTranspose2<BM_dim, BK_dim, MMA_M_dim, MMA_K_dim>(A + A_block_tile_index, A_shmem_blocktile, A_stride_elements, A_shmem_stride_elements);
-    // tileMemcpyTranspose2<BK_dim, BN_dim, MMA_K_dim, MMA_N_dim>(B + B_block_tile_index, B_shmem_blocktile, B_stride_elements, B_shmem_stride_elements);
+    tileMemcpyTranspose<BM_dim, BK_dim>(A + A_block_tile_index, A_shmem_blocktile, A_stride_bytes, BM_dim * sizeof(half));
+    tileMemcpyTranspose<BK_dim, BN_dim>(B + B_block_tile_index, B_shmem_blocktile, B_stride_bytes, BK_dim * sizeof(half));
     
     __syncthreads();
-
     // preload tiles of A into registers
 
-    for (unsigned int warp_k = 0; warp_k < BK_dim; warp_k += WK_dim)
+    for (unsigned int warp_k_ind = 0; warp_k_ind < mma_tiles_per_warp_k; warp_k_ind++)
     {
-
       half A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-      for (unsigned int mma_m = 0; mma_m < WM_dim; mma_m += MMA_M_dim)
+      for (unsigned int mma_m_ind = 0; mma_m_ind < mma_tiles_per_warp_m; mma_m++)
       {
-        for (unsigned int mma_k = 0; mma_k < WK_dim; mma_k += MMA_K_dim)
+        for (unsigned int mma_k_ind = 0; mma_k_ind < mma_tiles_per_warp_k; mma_k++)
         {
-          const unsigned int mma_m_ind = mma_m / MMA_M_dim;
-          const unsigned int mma_k_ind = mma_k / MMA_K_dim;
           const unsigned int A_shmem_offset = (warp_m + mma_m) * A_shmem_stride_elements + (warp_k + mma_k);
-          ldmatrix_m16n8(A_shmem_blocktile + A_shmem_offset, A_register[mma_m_ind][mma_k_ind], A_shmem_stride_bytes);
+          ldmatrix_m16n8(A_shmem_blocktile + A_shmem_offset, A_register[mma_m_ind][mma_k_ind], sizeof(float4));
         }
       }
 
@@ -125,7 +119,7 @@ tensorcore_5(half* A,
         for (unsigned int mma_n = 0; mma_n < WN_dim; mma_n += MMA_N_dim)
         {
           const unsigned int B_shmem_offset = (warp_k + mma_k) * B_shmem_stride_elements + (warp_n + mma_n);
-          ldmatrix_n8k8(B_shmem_blocktile + B_shmem_offset, B_register, B_shmem_stride_bytes);
+          ldmatrix_n8k8(B_shmem_blocktile + B_shmem_offset, B_register, sizeof(float4));
           B_register[0] *= alpha;
           B_register[1] *= alpha;
           for (unsigned int mma_m = 0; mma_m < WM_dim; mma_m += MMA_M_dim)
