@@ -435,15 +435,15 @@ void tensorcore_5_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     
     constexpr unsigned int BM_dim = 128;
     constexpr unsigned int BN_dim = 128;
-    constexpr unsigned int BK_dim = 64;
+    constexpr unsigned int BK_dim = 128;
     
-    constexpr unsigned int MMA_M_dim = 16;
+    constexpr unsigned int MMA_M_dim = 8;
     constexpr unsigned int MMA_N_dim = 8;
     constexpr unsigned int MMA_K_dim = 8;
     
     constexpr unsigned int WARPS_PER_BLOCK_M = 4;
     constexpr unsigned int WARPS_PER_BLOCK_N = 4;
-    constexpr unsigned int WARPS_PER_BLOCK_K = 1;
+    constexpr unsigned int WARPS_PER_BLOCK_K = 4;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
     constexpr unsigned int WN_dim = BM_dim / WARPS_PER_BLOCK_N;
@@ -462,14 +462,19 @@ void tensorcore_5_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     const unsigned int BlocksN = N / BN_dim;
     const unsigned int ThreadsM = 1;
     const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N;
+    const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
-
+    
+    CUDA_CHECK(cudaFuncSetAttribute(tensorcore_5<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>,
+    cudaFuncAttributeMaxDynamicSharedMemorySize,
+    65536)); // set shared memory limit to 64KB which is maximum for sm_75
+    
     tensorcore_5
     <BM_dim, BN_dim, BK_dim,
     WM_dim, WN_dim, WK_dim>
-    <<<gridDim, blockDim>>>(
+    <<<gridDim, blockDim, shmem_bytes>>>(
         device_sgemm_params.A,
         device_sgemm_params.B,
         device_sgemm_params.C,
@@ -491,7 +496,7 @@ void tensorcore_5_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
             tensorcore_5
             <BM_dim, BN_dim, BK_dim,
             WM_dim, WN_dim, WK_dim>
-            <<<gridDim, blockDim>>>(
+            <<<gridDim, blockDim, shmem_bytes>>>(
                 device_sgemm_params.A,
                 device_sgemm_params.B,
                 device_sgemm_params.C,

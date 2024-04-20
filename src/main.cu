@@ -42,8 +42,8 @@
             tensorcore_4_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 5:
-            device_sgemm_params.alpha = 0.0f;
-            host_sgemm_params.alpha = 0.0f;
+            // device_sgemm_params.alpha = 0.0f;
+            // host_sgemm_params.alpha = 0.0f;
             tensorcore_5_launch(device_sgemm_params, timer, num_iterations);
             break;
         
