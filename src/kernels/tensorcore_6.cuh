@@ -99,8 +99,8 @@ tensorcore_6(half* A,
     // load in current tile of A,B along K dimension
     const unsigned int A_block_tile_index = block_m * A_stride_elements + block_k;
     const unsigned int B_block_tile_index = block_k * B_stride_elements + block_n;
-    tileMemcpyTranspose<BM_dim, BK_dim>(A + A_block_tile_index, A_shmem_blocktile, A_stride_bytes, BM_dim * sizeof(half));
-    tileMemcpyTranspose<BK_dim, BN_dim>(B + B_block_tile_index, B_shmem_blocktile, B_stride_bytes, BK_dim * sizeof(half));
+    tileMemcpyTranspose2<BM_dim, BK_dim>(A + A_block_tile_index, A_shmem_blocktile, A_stride_bytes, BM_dim * sizeof(half));
+    tileMemcpyTranspose2<BK_dim, BN_dim>(B + B_block_tile_index, B_shmem_blocktile, B_stride_bytes, BK_dim * sizeof(half));
     
     __syncthreads();
     // preload tiles of A into registers

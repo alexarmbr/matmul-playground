@@ -518,10 +518,10 @@ void tensorcore_6_launch(sgemm_params<half> device_sgemm_params, KernelLogger& t
     
     constexpr unsigned int BM_dim = 128;
     constexpr unsigned int BN_dim = 128;
-    constexpr unsigned int BK_dim = 128;
+    constexpr unsigned int BK_dim = 64;
     
-    constexpr unsigned int WARPS_PER_BLOCK_M = 4;
-    constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_M = 2;
+    constexpr unsigned int WARPS_PER_BLOCK_N = 2;
     constexpr unsigned int WARPS_PER_BLOCK_K = 4;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;

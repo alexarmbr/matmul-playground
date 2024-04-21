@@ -7,7 +7,6 @@
 
   int main(int argc, char **argv) {
     bool check_on_cpu = false;
-
     
     if (argc != 3) {
         std::cerr << "Usage: " << argv[0] << " <kernel_id> <num_iterations>" << std::endl;
