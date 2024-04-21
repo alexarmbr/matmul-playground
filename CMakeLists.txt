@@ -14,17 +14,15 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 75)
 endif()
 
-# cuda include directories
-include_directories(include)
+file(GLOB SOURCES "src/kernel*.cu")
+
+add_library(kernels ${SOURCES})
+add_library(cublas_launch src/cublas_benchmark.cu)
+target_link_libraries(cublas_launch CUDA::cublas)
 
 add_executable(runner src/main.cu)
-target_link_libraries(runner CUDA::cublas)
-target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
+target_link_libraries(runner PRIVATE kernels cublas_launch)
+
+# target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
 # target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 # target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
-
-add_executable(tests src/test.cu)
-# target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
-
-target_link_libraries(tests GTest::GTest GTest::Main)
-# target_compile_options(tests PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)

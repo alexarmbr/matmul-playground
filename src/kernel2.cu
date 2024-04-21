@@ -1,15 +1,13 @@
-#pragma once
 #include <cuda.h>
 #include <mma.h>
 
 #include "device_utils.cuh"
-
-using namespace nvcuda;
+#include "structs_n_stuff.cuh"
 
 template <unsigned int BM_dim,
 unsigned int BN_dim,
 unsigned int BK_dim>
-__global__ void tensorcore_4(half* A,
+__global__ void kernel_2(half* A,
   half* B,
   half* C,
   half* D,
@@ -31,8 +29,6 @@ __global__ void tensorcore_4(half* A,
   const unsigned int A_stride_elements = K;
   const unsigned int B_stride_elements = N;
   const unsigned int CD_stride_elements = N;
-  // const unsigned int A_stride_bytes = K * sizeof(half);
-  // const unsigned int B_stride_bytes = N * sizeof(half);
   const unsigned int CD_stride_bytes = N * sizeof(half);
   
   // top left coords of the block tile
@@ -103,6 +99,61 @@ __global__ void tensorcore_4(half* A,
 
   const unsigned int D_gmem_index = (block_m + warp_m) * CD_stride_elements + block_n + warp_n;
   stmatrix_m16n8(D + D_gmem_index, C_register, CD_stride_bytes);
+}
+
+
+
+
+void kernel_2_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+{
+    constexpr unsigned int WM_dim = 16;
+    constexpr unsigned int WN_dim = 8;
+    constexpr unsigned int WK_dim = 8;
+    
+    constexpr unsigned int WARPS_PER_BLOCK_M = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_K = 4;
+    constexpr unsigned int BM_dim = WM_dim * WARPS_PER_BLOCK_M;
+    constexpr unsigned int BN_dim = WN_dim * WARPS_PER_BLOCK_N;
+    constexpr unsigned int BK_dim = WK_dim * WARPS_PER_BLOCK_K;
+    const unsigned int M = device_sgemm_params.M;
+    const unsigned int N = device_sgemm_params.N;
+    const unsigned int K = device_sgemm_params.K;
+
+    assert(M % BM_dim == 0);
+    assert(N % BN_dim == 0);
+    assert(K % BK_dim == 0);
+    
+    constexpr unsigned int WARP_SIZE = 32;
+    const unsigned int BlocksM = M / BM_dim;
+    const unsigned int BlocksN = N / BN_dim;
+    const unsigned int ThreadsM = 1;
+    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N;
+
+    dim3 gridDim(BlocksN, BlocksM);
+    dim3 blockDim(ThreadsN, ThreadsM);
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        timer.Start();
+        kernel_2
+        <BM_dim, BN_dim, BK_dim>
+        <<<gridDim, blockDim>>>(
+            device_sgemm_params.A,
+            device_sgemm_params.B,
+            device_sgemm_params.C,
+            device_sgemm_params.D,
+            device_sgemm_params.alpha,
+            device_sgemm_params.beta,
+            M,
+            N,
+            K
+        );
+        timer.Stop();
+    }
+    double gflops_per_sec = timer.logKernelStats(M, N, K);
+    std::cout << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
+    CUDA_CHECK(cudaPeekAtLastError());
 }
 
 

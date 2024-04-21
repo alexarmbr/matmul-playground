@@ -1,8 +1,8 @@
-#pragma once
 #include <cuda.h>
 #include <mma.h>
 
 #include "device_utils.cuh"
+#include "structs_n_stuff.cuh"
 
 using namespace nvcuda;
 
@@ -12,7 +12,7 @@ unsigned int BK_dim,
 unsigned int WM_dim,
 unsigned int WN_dim,
 unsigned int WK_dim>
-__global__ void tensorcore_1(half* A,
+__global__ void kernel_1(half* A,
   half* B,
   half* C,
   half* D,
@@ -71,4 +71,51 @@ __global__ void tensorcore_1(half* A,
   }
   
   wmma::store_matrix_sync(D + CD_tile_index, c_frag, CD_stride, wmma::mem_row_major);
+}
+
+void kernel_1_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+{
+    constexpr unsigned int WM_dim = 16;
+    constexpr unsigned int WN_dim = 16;
+    constexpr unsigned int WK_dim = 16;
+    constexpr unsigned int WARPS_PER_BLOCK_M = 2;
+    constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_K = 1;
+    constexpr unsigned int BM_dim = WM_dim * WARPS_PER_BLOCK_M;
+    constexpr unsigned int BN_dim = WN_dim * WARPS_PER_BLOCK_N;
+    constexpr unsigned int BK_dim = WK_dim * WARPS_PER_BLOCK_K; 
+    const unsigned int M = device_sgemm_params.M;
+    const unsigned int N = device_sgemm_params.N;
+    const unsigned int K = device_sgemm_params.K;
+
+    constexpr unsigned int WARP_SIZE = 32;
+    const unsigned int BlocksM = M / BM_dim;
+    const unsigned int BlocksN = N / BN_dim;
+    const unsigned int ThreadsM = 1;
+    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N;
+
+    dim3 gridDim(BlocksN, BlocksM);
+    dim3 blockDim(ThreadsN, ThreadsM);
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        timer.Start();
+        kernel_1
+        <BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>
+        <<<gridDim, blockDim>>>(
+            device_sgemm_params.A,
+            device_sgemm_params.B,
+            device_sgemm_params.C,
+            device_sgemm_params.D,
+            device_sgemm_params.alpha,
+            device_sgemm_params.beta,
+            M,
+            N,
+            K
+        );
+        timer.Stop();
+    }
+    double gflops_per_sec = timer.logKernelStats(M, N, K);
+    std::cout << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
+    CUDA_CHECK(cudaPeekAtLastError());
 }

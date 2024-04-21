@@ -1,10 +1,8 @@
-#pragma once
 #include <cuda.h>
 #include <mma.h>
 
 #include "device_utils.cuh"
-
-using namespace nvcuda;
+#include "structs_n_stuff.cuh"
 
 template <unsigned int BM_dim,
 unsigned int BN_dim,
@@ -13,7 +11,7 @@ unsigned int WM_dim,
 unsigned int WN_dim,
 unsigned int WK_dim>
 __global__ void
-tensorcore_5(half* A,
+kernel_3(half* A,
   half* B,
   half* C,
   half* D,
@@ -40,9 +38,6 @@ tensorcore_5(half* A,
   const unsigned int A_stride_elements = K;
   const unsigned int B_stride_elements = N;
   const unsigned int CD_stride_elements = N;
-  // const unsigned int A_stride_bytes = K * sizeof(half);
-  // const unsigned int B_stride_bytes = N * sizeof(half);
-  // const unsigned int CD_stride_bytes = N * sizeof(half);
   
   // top left coords of the block tile
   const unsigned int block_m = blockIdx.y * BM_dim;
@@ -62,10 +57,8 @@ tensorcore_5(half* A,
   
   constexpr unsigned int A_shmem_stride_elements = BK_dim;
   constexpr unsigned int B_shmem_stride_elements = BN_dim;
-  constexpr unsigned int CD_shmem_stride_elements = BN_dim;
   constexpr unsigned int A_shmem_stride_bytes = A_shmem_stride_elements * sizeof(half);
   constexpr unsigned int B_shmem_stride_bytes = B_shmem_stride_elements * sizeof(half);
-  // constexpr unsigned int CD_shmem_stride_bytes = BN_dim * sizeof(half);
 
   // declare register storage to hold fragments of C which we will accumulate into
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
@@ -95,8 +88,6 @@ tensorcore_5(half* A,
     const unsigned int B_block_tile_index = block_k * B_stride_elements + block_n;
     tileMemcpy<BM_dim, BK_dim, half>(A + A_block_tile_index, A_shmem_blocktile, A_stride_elements, A_shmem_stride_elements);
     tileMemcpy<BK_dim, BN_dim, half>(B + B_block_tile_index, B_shmem_blocktile, B_stride_elements, B_shmem_stride_elements);
-    // tileMemcpyTranspose2<BM_dim, BK_dim, MMA_M_dim, MMA_K_dim>(A + A_block_tile_index, A_shmem_blocktile, A_stride_elements, A_shmem_stride_elements);
-    // tileMemcpyTranspose2<BK_dim, BN_dim, MMA_K_dim, MMA_N_dim>(B + B_block_tile_index, B_shmem_blocktile, B_stride_elements, B_shmem_stride_elements);
     
     __syncthreads();
 
@@ -157,6 +148,69 @@ tensorcore_5(half* A,
           stmatrix_m16n8(D + D_offset, C_register[mma_m_ind][mma_n_ind], CD_stride_elements * sizeof(half)); 
       }
   }
+}
+
+
+void kernel_3_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+{
+    
+    constexpr unsigned int BM_dim = 128;
+    constexpr unsigned int BN_dim = 128;
+    constexpr unsigned int BK_dim = 128;
+    
+    constexpr unsigned int WARPS_PER_BLOCK_M = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_K = 4;
+
+    constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
+    constexpr unsigned int WN_dim = BM_dim / WARPS_PER_BLOCK_N;
+    constexpr unsigned int WK_dim = BK_dim / WARPS_PER_BLOCK_K;
+
+    const unsigned int M = device_sgemm_params.M;
+    const unsigned int N = device_sgemm_params.N;
+    const unsigned int K = device_sgemm_params.K;
+
+    assert(M % BM_dim == 0);
+    assert(N % BN_dim == 0);
+    assert(K % BK_dim == 0);
+    
+    constexpr unsigned int WARP_SIZE = 32;
+    const unsigned int BlocksM = M / BM_dim;
+    const unsigned int BlocksN = N / BN_dim;
+    const unsigned int ThreadsM = 1;
+    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N;
+    const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+
+    dim3 gridDim(BlocksN, BlocksM);
+    dim3 blockDim(ThreadsN, ThreadsM);
+    
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_3<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>,
+    cudaFuncAttributeMaxDynamicSharedMemorySize,
+    65536)); // set shared memory limit to 64KB which is maximum for sm_75
+    
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        timer.Start();
+        kernel_3
+        <BM_dim, BN_dim, BK_dim,
+        WM_dim, WN_dim, WK_dim>
+        <<<gridDim, blockDim, shmem_bytes>>>(
+            device_sgemm_params.A,
+            device_sgemm_params.B,
+            device_sgemm_params.C,
+            device_sgemm_params.D,
+            device_sgemm_params.alpha,
+            device_sgemm_params.beta,
+            M,
+            N,
+            K
+        );
+        timer.Stop();
+    }
+    double gflops_per_sec = timer.logKernelStats(M, N, K);
+    std::cout << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
+    CUDA_CHECK(cudaPeekAtLastError());
 }
 
 

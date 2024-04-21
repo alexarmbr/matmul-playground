@@ -1,89 +1,10 @@
 #pragma once
 #include <cuda.h>
+#include <assert.h>
 
-
-
-__device__ void tileMemcpySwizzle(
-    half* src,
-    half* dst,
-    const unsigned int src_stride_bytes,
-    const unsigned int dst_stride_bytes,
-    const unsigned int TILE_ROWS
-)
-{
-    // one row contains 64 halfs, 128 bytes, 32 words
-    // so all values in each column fall on the same memory bank
-    constexpr unsigned int TILE_COLS = 64;
-    assert(src_stride_bytes % 128 == 0);
-    assert(dst_stride_bytes % 128 == 0);
-
-    float4* src_float4 = reinterpret_cast<float4*>(src);
-    float4* dst_float4 = reinterpret_cast<float4*>(dst);
-    const unsigned int src_stride_float4 = src_stride_bytes / sizeof(float4);
-    const unsigned int dst_stride_float4 = dst_stride_bytes / sizeof(float4);
-
-    const unsigned int lane = threadIdx.x % 32;
-    const unsigned int src_col = lane % 8;
-    unsigned int src_row = lane / 8;
-
-    unsigned int dst_row = (src_col & 1) | ((src_col >> 1) & 2);
-    const unsigned int dst_col = ((src_col << 1) & 4) | (src_row ^ dst_row);
-
-    while (src_row < TILE_ROWS)
-    {
-        dst_float4[dst_row * dst_stride_float4 + dst_col] = src_float4[src_row * src_stride_float4 + src_col];
-        src_row += 4;
-        dst_row += 4;
-    }
-}
-
-
-// copy from a tile of shape (row, col) to a tile of shape (col, row)
 template<unsigned int TILE_ROWS,
 unsigned int TILE_COLS>
 __device__ void tileMemcpyTranspose(
-    half* src,
-    half* dst,
-    const unsigned int src_stride_bytes,
-    const unsigned int dst_stride_bytes
-)
-{
-    // copy/transpose is performed in 16x16 tiles
-    // reading 2 rows of 8 halfs each == 2x16 bytes is the smallest chunk
-    // of global memory we can read without wasting any bandwidth
-    // a 16x16 tile (128 bytes) can be written to a row of shmem with 0 bank conflicts
-    static_assert(TILE_COLS % 16 == 0);
-    static_assert(TILE_ROWS % 16 == 0);
-    assert(src_stride_bytes % (TILE_COLS * sizeof(half)) == 0);
-    assert(dst_stride_bytes % (TILE_ROWS * sizeof(half)) == 0);
-    assert(blockDim.y == 1);
-
-    float4* src_float4 = reinterpret_cast<float4*>(src);
-    float4* dst_float4 = reinterpret_cast<float4*>(dst);
-    const unsigned int src_stride_float4 = src_stride_bytes / sizeof(float4);
-    const unsigned int dst_stride_float4 = TILE_ROWS;
-    constexpr unsigned int tile_cols_float4 = TILE_COLS / (sizeof(float4) / sizeof(half));
-    constexpr unsigned int COL_STRIDE = 2;
-    const unsigned int ROW_STRIDE = blockDim.x / COL_STRIDE;
-
-    // adjacent threads go down rows, do two columns at a time
-    unsigned int src_row = threadIdx.x % ROW_STRIDE;
-    while (src_row < TILE_ROWS)
-    {
-        unsigned int src_col = threadIdx.x / ROW_STRIDE;
-        while (src_col < tile_cols_float4)
-        {
-            dst_float4[src_col * dst_stride_float4 + src_row] = src_float4[src_row * src_stride_float4 + src_col];
-            src_col += 2;
-        }
-        src_row += ROW_STRIDE;
-    }
-}
-
-// copy from a tile of shape (row, col) to a tile of shape (col, row)
-template<unsigned int TILE_ROWS,
-unsigned int TILE_COLS>
-__device__ void tileMemcpyTranspose2(
     half* src,
     half* dst,
     const unsigned int src_stride_bytes,
@@ -280,26 +201,3 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
     fragment_row += 8;
     reg_[1] = src_ptr[fragment_row * src_stride_bytes + fragment_col];
 }
-
-
-// a warp does a single mma operation with A,B,C coming from shared memory
-// D is written back to global memory
-//
-// D = alpha * A *       B + beta * C
-// (16x8) =    (16x8) * (8x8) +     (16x8)
-__device__ __forceinline__ void mma_m16n8k8(
-    half* A_shared,
-    half* B_shared,
-    half* C_shared,
-    half* D, // D is a pointer to global memory
-    half alpha,
-    half beta,
-    const unsigned int M,
-    const unsigned int N,
-    const unsigned int K,
-    bool accumulate_C
-)
-{
-
-}
-
