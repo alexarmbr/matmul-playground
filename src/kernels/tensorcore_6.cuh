@@ -34,7 +34,10 @@ tensorcore_6(half* A,
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;
   constexpr unsigned int mma_tiles_per_warp_m = WM_dim / MMA_M_dim;
   constexpr unsigned int mma_tiles_per_warp_n = WN_dim / MMA_N_dim;
-  constexpr unsigned int warps_per_block_n = BN_dim / WN_dim;
+
+  const unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
+  const unsigned int warp_tiles_per_block_m = BM_dim / WM_dim;
+  const unsigned int warp_tiles_per_block_n = BN_dim / WN_dim;
   
   constexpr unsigned int WARP_SIZE = 32;
   const unsigned int A_stride_elements = K;
@@ -50,8 +53,8 @@ tensorcore_6(half* A,
   
   // top left coords of a warp tile, relative to the block tile its in
   const unsigned int warp_index = threadIdx.x / WARP_SIZE;
-  const unsigned int warp_m_ind = warp_index / warps_per_block_n;
-  const unsigned int warp_n_ind = warp_index % warps_per_block_n;
+  const unsigned int warp_m_ind = warp_index / warp_tiles_per_block_n;
+  const unsigned int warp_n_ind = warp_index % warp_tiles_per_block_n;
   const unsigned int warp_m = warp_m_ind * WM_dim;
   const unsigned int warp_n = warp_n_ind * WN_dim;
 
@@ -65,7 +68,10 @@ tensorcore_6(half* A,
   constexpr unsigned int CD_shmem_stride_elements = BN_dim;
   constexpr unsigned int A_shmem_stride_bytes = A_shmem_stride_elements * sizeof(half);
   constexpr unsigned int B_shmem_stride_bytes = B_shmem_stride_elements * sizeof(half);
-  // constexpr unsigned int CD_shmem_stride_bytes = BN_dim * sizeof(half);
+  constexpr unsigned int A_shmem_transpose_col_stride_elements = MMA_M_dim * MMA_K_dim;
+  constexpr unsigned int A_shmem_transpose_row_stride_elements = A_shmem_transpose_col_stride_elements * mma_tiles_per_warp_m * warp_tiles_per_block_m;
+  constexpr unsigned int B_shmem_transpose_col_stride_elements = MMA_N_dim * MMA_K_dim;
+  constexpr unsigned int B_shmem_transpose_row_stride_elements = B_shmem_transpose_col_stride_elements * mma_tiles_per_warp_k * warp_tiles_per_block_k;
 
   // declare register storage to hold fragments of C which we will accumulate into
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
@@ -99,14 +105,18 @@ tensorcore_6(half* A,
     __syncthreads();
     // preload tiles of A into registers
 
-    for (unsigned int warp_k_ind = 0; warp_k_ind < mma_tiles_per_warp_k; warp_k_ind++)
+    
+    for (unsigned int warp_k_ind = 0; warp_k_ind < warp_tiles_per_block_k; warp_k_ind++)
     {
       half A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-      for (unsigned int mma_m_ind = 0; mma_m_ind < mma_tiles_per_warp_m; mma_m++)
+      for (unsigned int mma_m_ind = 0; mma_m_ind < mma_tiles_per_warp_m; mma_m_ind++)
       {
-        for (unsigned int mma_k_ind = 0; mma_k_ind < mma_tiles_per_warp_k; mma_k++)
+        for (unsigned int mma_k_ind = 0; mma_k_ind < mma_tiles_per_warp_k; mma_k_ind++)
         {
-          const unsigned int A_shmem_offset = (warp_m + mma_m) * A_shmem_stride_elements + (warp_k + mma_k);
+          const unsigned int mma_tile_row_ind = warp_k_ind * mma_tiles_per_warp_k + mma_k_ind;
+          const unsigned int mma_tile_col_ind = warp_m_ind * mma_tiles_per_warp_m + mma_m_ind;
+          const unsigned int A_shmem_offset = mma_tile_row_ind * A_shmem_transpose_row_stride_elements +
+          mma_tile_col_ind * A_shmem_transpose_col_stride_elements;
           ldmatrix_m16n8(A_shmem_blocktile + A_shmem_offset, A_register[mma_m_ind][mma_k_ind], sizeof(float4));
         }
       }
@@ -114,19 +124,20 @@ tensorcore_6(half* A,
       // load one tile of B at a time, and take outer product between this tile and
       // entire warp tile of A
       half B_register[2];
-      for (unsigned int mma_k = 0; mma_k < WK_dim; mma_k += MMA_K_dim)
+      for (unsigned int mma_k_ind = 0; mma_k_ind < mma_tiles_per_warp_k; mma_k_ind++)
       {
-        for (unsigned int mma_n = 0; mma_n < WN_dim; mma_n += MMA_N_dim)
+        for (unsigned int mma_n_ind = 0; mma_n_ind < mma_tiles_per_warp_n; mma_n_ind++)
         {
-          const unsigned int B_shmem_offset = (warp_k + mma_k) * B_shmem_stride_elements + (warp_n + mma_n);
+          const unsigned int mma_tile_row_ind = warp_n_ind * mma_tiles_per_warp_n + mma_n_ind;
+          const unsigned int mma_tile_col_ind = warp_k_ind * mma_tiles_per_warp_k + mma_k_ind;
+          const unsigned int B_shmem_offset = mma_tile_row_ind * B_shmem_transpose_row_stride_elements +
+          mma_tile_col_ind * B_shmem_transpose_col_stride_elements;
+          
           ldmatrix_n8k8(B_shmem_blocktile + B_shmem_offset, B_register, sizeof(float4));
           B_register[0] *= alpha;
           B_register[1] *= alpha;
-          for (unsigned int mma_m = 0; mma_m < WM_dim; mma_m += MMA_M_dim)
+          for (unsigned int mma_m_ind = 0; mma_m_ind < mma_tiles_per_warp_m; mma_m_ind++)
           {
-            const unsigned int mma_m_ind = mma_m / MMA_M_dim;
-            const unsigned int mma_k_ind = mma_k / MMA_K_dim;
-            const unsigned int mma_n_ind = mma_n / MMA_N_dim;
             mma_sync_m16n8k8(
               C_register[mma_m_ind][mma_n_ind],
               A_register[mma_m_ind][mma_k_ind],

@@ -23,7 +23,6 @@
     const unsigned int N = 4096;
     const unsigned int K = 4096;
     
-    
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup<half>(M, N, K);
     // device_sgemm_params.beta = 1.0f;
     // host_sgemm_params.beta = 1.0f;
@@ -46,6 +45,8 @@
             tensorcore_5_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 6:
+            // device_sgemm_params.alpha = 0.0f;
+            // host_sgemm_params.alpha = 0.0f;
             tensorcore_6_launch(device_sgemm_params, timer, num_iterations);
             break;
         
