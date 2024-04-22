@@ -16,12 +16,15 @@ endif()
 
 file(GLOB SOURCES "src/kernel*.cu")
 
-add_library(kernels ${SOURCES})
-add_library(cublas_launch src/cublas_benchmark.cu)
-target_link_libraries(cublas_launch CUDA::cublas)
+# add_library(kernels ${SOURCES})
+# add_library(cublas_launch src/cublas_benchmark.cu)
+# target_link_libraries(cublas_launch CUDA::cublas)
 
-add_executable(runner src/main.cu)
-target_link_libraries(runner PRIVATE kernels cublas_launch)
+# add_executable(runner src/main.cu)
+# target_link_libraries(runner PRIVATE kernels cublas_launch)
+
+add_executable(async tmp/async.cu)
+target_include_directories(async PRIVATE src)
 
 # target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
 # target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)

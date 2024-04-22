@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cuda.h>
+#include <cuda_fp16.h>
 #include <vector>
 #include <iostream>
 #include <numeric>
