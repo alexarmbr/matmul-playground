@@ -1,7 +1,12 @@
+#include <cuda/pipeline>
+#include <cooperative_groups.h>
+
 #include <iostream>
 #include <array>
 #include <vector>
 #include "structs_n_stuff.cuh"
+
+namespace cg = cooperative_groups;
 
 #define CUDA_CHECK(status)                                              \
   {                                                                     \
@@ -14,10 +19,11 @@
   }
 
 
-template <unsigned int SHMEM_SIZE>
+template <unsigned int SHMEM_SIZE_BYTES>
 __global__ void increment(float* src, float* dst, unsigned int num_elements)
 {
     extern __shared__ float shmem[];
+    constexpr unsigned int SHMEM_SIZE = SHMEM_SIZE_BYTES / sizeof(float);
     for (unsigned int i = threadIdx.x; i < num_elements; i += SHMEM_SIZE)
     {
         for (unsigned int j = 0; j < SHMEM_SIZE; j+=blockDim.x)
@@ -32,6 +38,42 @@ __global__ void increment(float* src, float* dst, unsigned int num_elements)
         }
     }
 }
+
+template <unsigned int SHMEM_SIZE_BYTES>
+__global__ void increment_async(float* src, float* dst, unsigned int num_elements)
+{
+    extern __shared__ float shmem[];
+    constexpr unsigned int PIPELINE_NUM_STAGES = 2;
+    constexpr unsigned int SHMEM_SIZE = SHMEM_SIZE_BYTES / sizeof(float);
+    constexpr unsigned int SHMEM_CHUNK_SIZE = SHMEM_SIZE / PIPELINE_NUM_STAGES;
+    size_t shmem_offset[2] = {0, SHMEM_CHUNK_SIZE};
+
+    cg::grid_group grid = cg::this_grid();
+    cg::thread_block block = cg::this_thread_block();
+    
+    // threads in the last warp are producers, other threads are consumers
+    const cuda::pipeline_role thread_role =
+     block.thread_rank() < (block.size() - 32) ? thread_role = cuda::pipeline_role::consumer : cuda::pipeline_role::producer;
+
+    __shared__ cuda::pipeline_shared_state<cuda::thread_scope::thread_scope_block, SHMEM_CHUNK_SIZE> shared_state;
+    cuda::pipeline pipeline = cuda::make_pipeline(block, &shared_state);
+    
+    if (thread_role == cuda::pipeline_role::producer)
+    {
+        pipeline.prodcer_acquire();
+        for (int i = block.thread_rank(); i < SHMEM_CHUNK_SIZE; i += block.size())
+        {
+            shmem[i] = src[i];
+        }
+        pipeline.producer_commit();
+    }
+}
+
+
+
+
+
+
 
 
 
