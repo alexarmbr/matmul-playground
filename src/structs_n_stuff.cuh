@@ -87,5 +87,10 @@ struct KernelLogger
         logs.push_back(std::make_pair(info, gflops_per_sec));
         return gflops_per_sec;
       }
+
+      double getAvgTime()
+      {
+            return std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+      }
 };
 

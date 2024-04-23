@@ -27,5 +27,5 @@ add_executable(async tmp/async.cu)
 target_include_directories(async PRIVATE src)
 
 # target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
-# target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
+target_compile_options(async PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 # target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
