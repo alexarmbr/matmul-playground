@@ -7,6 +7,7 @@
 #include "structs_n_stuff.cuh"
 
 namespace cg = cooperative_groups;
+using barrier = cuda::barrier<cuda::thread_scope_block>;
 
 #define CUDA_CHECK(status)                                              \
   {                                                                     \
@@ -44,29 +45,52 @@ __global__ void increment(float* src, float* dst, unsigned int num_elements)
     }
 }
 
-__device__ void produce(float* src, float* dst, unsigned int num_elements)
+__device__ void produce(float* src,
+     float* shmem,
+     const unsigned int num_elements,
+     const size_t shmem_offsets[2],
+     barrier ready[2],
+     barrier filled[2]
+    )
 {
-    if (threadIdx.x >= 32)
-        return;
-
-    for (unsigned int i = threadIdx.x; i < num_elements; i += 32)
+    const unsigned int chunk_size = shmem_offsets[1];
+    for (unsigned int i=0; i < (num_elements / chunk_size); i++)
     {
-        dst[i] = src[i];
+        ready[i%2].arrive_and_wait();
+        float* shmem_chunk = shmem + shmem_offsets[i%2];
+        for (unsigned int j = threadIdx.x; j < chunk_size; j+=32)
+        {
+            shmem_chunk[j] = src[i*chunk_size + j];
+        }
+        barrier::arrival_token token = filled[i%2].arrive();
     }
+
 }
 
-__device__ void consume(float* src, float* dst, unsigned int num_elements)
+__device__ void consume(float* shmem,
+     float* dst,
+     unsigned int num_elements,
+     size_t shmem_offsets[2],
+     barrier ready[2],
+     barrier filled[2]
+    )
 {
-    if (threadIdx.x < 32)
-        return;
-
-    for (unsigned int i = threadIdx.x - 32; i < num_elements; i++)
+    const unsigned int chunk_size = shmem_offsets[1];
+    barrier::arrival_token token = ready[0].arrive();
+    token = ready[1].arrive();
+    for (unsigned int i=0; i < (num_elements / chunk_size); i++)
     {
-        for (unsigned int k = 0; k < 10; k++)
+        filled[i%2].arrive_and_wait();
+        float* shmem_chunk = shmem + shmem_offsets[i%2];
+        for (unsigned int j = threadIdx.x - 32; j < chunk_size; j+=blockDim.x-32)
         {
-            src[i] += 1;
+            for (unsigned int k = 0; k < 10; k++)
+            {
+                shmem_chunk[j]+=1;
+            }
+            dst[i * chunk_size + j] = shmem_chunk[j];
         }
-        dst[i] = src[i];
+        barrier::arrival_token token = ready[i%2].arrive();
     }
 }
 
@@ -81,65 +105,23 @@ __global__ void increment_async(float* src, float* dst, unsigned int num_element
 
     cg::grid_group grid = cg::this_grid();
     cg::thread_block block = cg::this_thread_block();
+
+    __shared__ cuda::barrier<cuda::thread_scope_block> barrier[4];
+    if (block.thread_rank() < 4)
+    {
+        init(barrier + block.thread_rank(), block.size());
+    }
+    block.sync();
+
+    if (block.thread_rank() < 32)
+    {
+        produce(src, shmem, num_elements, shmem_offset, barrier, barrier + 2);
+    }
+    else
+    {
+        consume(shmem, dst, num_elements, shmem_offset, barrier, barrier + 2);
+    }
     
-    // threads in the first warp are producers, other threads are consumers
-    cuda::pipeline_role thread_role =
-     block.thread_rank() < 32 ? thread_role = cuda::pipeline_role::producer : cuda::pipeline_role::consumer;
-
-    extern __shared__ cuda::pipeline_shared_state<cuda::thread_scope::thread_scope_block, PIPELINE_NUM_STAGES> shared_state;
-    cuda::pipeline pipeline = cuda::make_pipeline(block, &shared_state);
-    
-    // if (thread_role == cuda::pipeline_role::producer)
-    // {
-        pipeline.producer_acquire();
-        produce(src, shmem, SHMEM_CHUNK_SIZE);
-        pipeline.producer_commit();
-    // }
-    // else
-    // {
-        pipeline.consumer_wait();
-        consume(shmem, dst, SHMEM_CHUNK_SIZE);
-        pipeline.consumer_release();
-    // }
-
-
-    // for (int chunk_i = 1; chunk_i < (num_elements / SHMEM_CHUNK_SIZE); chunk_i++)
-    // {
-    //     float* producer_chunk = &shmem[shmem_offset[chunk_i % 2]];
-    //     float* consumer_chunk = &shmem[shmem_offset[(chunk_i - 1) % 2]];
-    //     if (thread_role == cuda::pipeline_role::consumer)
-    //     {
-    //         if (threadIdx.x == 32)
-    //         {
-    //             printf("CONSUMER BEGIN\n");
-    //         }
-    //         pipeline.consumer_wait();
-    //         consume(consumer_chunk, dst + (SHMEM_CHUNK_SIZE * (chunk_i-1)), SHMEM_CHUNK_SIZE);
-    //         pipeline.consumer_release();
-    //         if (threadIdx.x == 32)
-    //         {
-    //             printf("CONSUMER END\n");
-    //         }
-    //     }
-    //     else // producer
-    //     {
-    //         if (threadIdx.x == 0)
-    //         {
-    //             printf("PRODUCER BEGIN\n");
-    //         }
-    //         pipeline.producer_acquire();
-    //         produce(src + (SHMEM_CHUNK_SIZE * chunk_i), producer_chunk, SHMEM_CHUNK_SIZE);
-    //         pipeline.producer_commit();
-    //         if (threadIdx.x == 0)
-    //         {
-    //             printf("PRODUCER END\n");
-    //         }
-    //     }
-    // }
-
-
-
-
 }
 
 
@@ -185,12 +167,12 @@ int main()
     // check result
     // for (unsigned int i = 0; i < size; i++)
     // {
-    //     if (host_dst[i] != host_src[i] + 1)
+    //     if (host_dst[i] != host_src[i] + 10)
     //     {
-    //         std::cerr << "Mismatch at index: " << i << " expected: " << host_src[i] + 1 << " got: " << host_dst[i] << std::endl;
+    //         std::cerr << "Mismatch at index: " << i << " expected: " << host_src[i] + 10 << " got: " << host_dst[i] << std::endl;
     //         exit(EXIT_FAILURE);
     //     }
     // }
 
-    // std::cout << "Avg Kernel Time: " << logger.getAvgTime() << " ms" << std::endl;
+    std::cout << "Avg Kernel Time: " << logger.getAvgTime() << " ms" << std::endl;
 }
