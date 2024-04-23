@@ -34,7 +34,7 @@ kernel_5(half* A,
   constexpr unsigned int mma_tiles_per_warp_n = WN_dim / MMA_N_dim;
 
   const unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
-  const unsigned int warp_tiles_per_block_chunk_k = (BK_dim / 2) / WK_dim
+  const unsigned int warp_tiles_per_block_chunk_k = (BK_dim / 2) / WK_dim;
   const unsigned int warp_tiles_per_block_m = BM_dim / WM_dim;
   const unsigned int warp_tiles_per_block_n = BN_dim / WN_dim;
   
@@ -63,6 +63,8 @@ kernel_5(half* A,
   half* B_s = &shmem[BM_dim * BK_dim];
   const size_t A_s_offsets[2] = {0, BM_dim * BK_dim / 2};
   const size_t B_s_offsets[2] = {0, BK_dim * BN_dim / 2};
+  const size_t warp_k_offsets[2] = {0, warp_tiles_per_block_k / 2};
+  const size_t warp_k_limits[2] = {warp_tiles_per_block_k / 2, warp_tiles_per_block_k};
   
   constexpr unsigned int A_shmem_transpose_col_stride_elements = MMA_M_dim * MMA_K_dim;
   constexpr unsigned int A_shmem_transpose_row_stride_elements = A_shmem_transpose_col_stride_elements * mma_tiles_per_warp_m * warp_tiles_per_block_m;
@@ -91,7 +93,9 @@ kernel_5(half* A,
   }
 
   const unsigned int num_block_tiles_k = K / BK_dim;
-  for (unsigned int block_k_ind = 0; block_k_ind <= num_block_tiles_k; block_k_ind++)
+  constexpr unsigned int BK_chunk_dim = BK_dim / 2;
+  constexpr unsigned int B_stride_div[2] = {1,2};
+  for (unsigned int block_k_ind = 0; block_k_ind <= num_block_tiles_k * 2; block_k_ind++)
   {
     // if (block_k_ind != num_block_tiles_k)
     // {
@@ -101,13 +105,13 @@ kernel_5(half* A,
       // load in current tile of A,B along K dimension
       const unsigned int A_block_tile_index = block_m * A_stride_elements + block_k_ind * BK_dim;
       const unsigned int B_block_tile_index = block_k_ind * BK_dim * B_stride_elements + block_n;
-      tileMemcpyTranspose<BM_dim, BK_dim / 2>(A + A_block_tile_index, A_s_chunk, A_stride_bytes, BM_dim * sizeof(half));
-      tileMemcpyTranspose<BK_dim / 2, BN_dim>(B + B_block_tile_index, B_s_chunk, B_stride_bytes, BK_dim * sizeof(half));
+      tileMemcpyTranspose<BM_dim, BK_chunk_dim>(A + A_block_tile_index, A_s_chunk, A_stride_bytes, BM_dim * sizeof(half));
+      tileMemcpyTranspose<BK_chunk_dim, BN_dim>(B + B_block_tile_index, B_s_chunk, B_stride_bytes, BK_dim * sizeof(half) / B_stride_div[block_k_ind % 2]);
       __syncthreads();
     // }
     
     // preload tiles of A into registers
-    for (unsigned int warp_k_ind = 0; warp_k_ind < warp_tiles_per_block_chunk_k; warp_k_ind++)
+    for (unsigned int warp_k_ind = warp_k_offsets[block_k_ind % 2]; warp_k_ind < warp_k_limits[block_k_ind % 2]; warp_k_ind++)
     {
       half A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
       for (unsigned int mma_m_ind = 0; mma_m_ind < mma_tiles_per_warp_m; mma_m_ind++)
@@ -118,7 +122,7 @@ kernel_5(half* A,
           const unsigned int mma_tile_col_ind = warp_m_ind * mma_tiles_per_warp_m + mma_m_ind;
           const unsigned int A_shmem_offset = mma_tile_row_ind * A_shmem_transpose_row_stride_elements +
           mma_tile_col_ind * A_shmem_transpose_col_stride_elements;
-          ldmatrix_m16n8(A_s_chunk + A_shmem_offset, A_register[mma_m_ind][mma_k_ind], sizeof(float4));
+          ldmatrix_m16n8(A_s + A_shmem_offset, A_register[mma_m_ind][mma_k_ind], sizeof(float4));
         }
       }
 
@@ -134,7 +138,7 @@ kernel_5(half* A,
           const unsigned int B_shmem_offset = mma_tile_row_ind * B_shmem_transpose_row_stride_elements +
           mma_tile_col_ind * B_shmem_transpose_col_stride_elements;
           
-          ldmatrix_n8k8(B_s_chunk + B_shmem_offset, B_register, sizeof(float4));
+          ldmatrix_n8k8(B_s + B_shmem_offset, B_register, sizeof(float4));
           B_register[0] *= alpha;
           B_register[1] *= alpha;
           for (unsigned int mma_m_ind = 0; mma_m_ind < mma_tiles_per_warp_m; mma_m_ind++)
