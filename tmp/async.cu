@@ -31,12 +31,12 @@ __global__ void increment(float* src, float* dst, unsigned int num_elements)
         {
             shmem[j] = src[i+j];
             
-            for (int k = 0; k < 10; k++)
+            for (int k = 0; k < 1000; k++)
             {
                 shmem[j] += 1;
             }    
         }
-        __syncthreads();
+        // __syncthreads();
 
         for (unsigned int j = threadIdx.x; j < SHMEM_SIZE; j+=blockDim.x)
         {
@@ -45,91 +45,55 @@ __global__ void increment(float* src, float* dst, unsigned int num_elements)
     }
 }
 
-__device__ void produce(float* src,
-     float* shmem,
-     const unsigned int num_elements,
-     const size_t shmem_offsets[2],
-     barrier ready[2],
-     barrier filled[2]
-    )
-{
-    const unsigned int chunk_size = shmem_offsets[1];
-    for (unsigned int i=0; i < (num_elements / chunk_size); i++)
-    {
-        ready[i%2].arrive_and_wait();
-        float* shmem_chunk = shmem + shmem_offsets[i%2];
-        for (unsigned int j = threadIdx.x; j < chunk_size; j+=32)
-        {
-            shmem_chunk[j] = src[i*chunk_size + j];
-        }
-        barrier::arrival_token token = filled[i%2].arrive();
-    }
 
-}
-
-__device__ void consume(float* shmem,
-     float* dst,
-     unsigned int num_elements,
-     size_t shmem_offsets[2],
-     barrier ready[2],
-     barrier filled[2]
-    )
-{
-    const unsigned int chunk_size = shmem_offsets[1];
-    barrier::arrival_token token = ready[0].arrive();
-    token = ready[1].arrive();
-    for (unsigned int i=0; i < (num_elements / chunk_size); i++)
-    {
-        filled[i%2].arrive_and_wait();
-        float* shmem_chunk = shmem + shmem_offsets[i%2];
-        for (unsigned int j = threadIdx.x - 32; j < chunk_size; j+=blockDim.x-32)
-        {
-            for (unsigned int k = 0; k < 10; k++)
-            {
-                shmem_chunk[j]+=1;
-            }
-            dst[i * chunk_size + j] = shmem_chunk[j];
-        }
-        barrier::arrival_token token = ready[i%2].arrive();
-    }
-}
 
 template <unsigned int SHMEM_SIZE_BYTES>
 __global__ void increment_async(float* src, float* dst, unsigned int num_elements)
 {
     extern __shared__ float shmem[];
-    constexpr uint8_t PIPELINE_NUM_STAGES = 2;
     constexpr unsigned int SHMEM_SIZE = SHMEM_SIZE_BYTES / sizeof(float);
-    constexpr unsigned int SHMEM_CHUNK_SIZE = SHMEM_SIZE / PIPELINE_NUM_STAGES;
+    constexpr unsigned int SHMEM_CHUNK_SIZE = SHMEM_SIZE / 2;
     size_t shmem_offset[2] = {0, SHMEM_CHUNK_SIZE};
-
-    cg::grid_group grid = cg::this_grid();
-    cg::thread_block block = cg::this_thread_block();
-
-    __shared__ cuda::barrier<cuda::thread_scope_block> barrier[4];
-    if (block.thread_rank() < 4)
-    {
-        init(barrier + block.thread_rank(), block.size());
-    }
-    block.sync();
-
-    if (block.thread_rank() < 32)
-    {
-        produce(src, shmem, num_elements, shmem_offset, barrier, barrier + 2);
-    }
-    else
-    {
-        consume(shmem, dst, num_elements, shmem_offset, barrier, barrier + 2);
-    }
     
+    // fetch first chunk
+    // for (unsigned int j = threadIdx.x; j < SHMEM_CHUNK_SIZE; j+=blockDim.x)
+    // {
+    //     shmem[j] = src[j];
+    // }
+    
+    
+    const unsigned int iterations = num_elements / SHMEM_CHUNK_SIZE;
+    for (unsigned int chunk_i = 0; chunk_i <= iterations; chunk_i++)
+    {
+        // fetch i'th chunk
+        if (chunk_i != iterations)
+        {
+            float* shmem_chunk = &shmem[shmem_offset[chunk_i % 2]];
+            for (unsigned int j = threadIdx.x; j < SHMEM_CHUNK_SIZE; j+=blockDim.x)
+            {
+                shmem_chunk[j] = src[chunk_i * SHMEM_CHUNK_SIZE + j];
+            }
+        }
+        
+        // process i-1th chunk
+        if (chunk_i != 0)
+        {
+            float* shmem_chunk = &shmem[shmem_offset[(chunk_i-1) % 2]];
+            for (unsigned int j = threadIdx.x; j < SHMEM_CHUNK_SIZE; j+=blockDim.x)
+            {
+                for (unsigned int k = 0; k < 1000; k++)
+                {
+                    shmem_chunk[j]+=1;
+                }
+                dst[(chunk_i-1) * SHMEM_CHUNK_SIZE + j] = shmem_chunk[j];
+            }
+        }
+    }
+
+
+
+
 }
-
-
-
-
-
-
-
 
 
 int main()
@@ -154,13 +118,16 @@ int main()
     dim3 grid(num_blocks);
     dim3 block(num_threads);
     KernelLogger logger("async");
-    increment_async<SHMEM_SIZE><<<grid, block, SHMEM_SIZE>>>(device_src, device_dst, size);
-    // for (int i = 0; i < 10; i++)
-    // {
-    //     logger.Start();
-    //     increment<SHMEM_SIZE><<<grid, block, SHMEM_SIZE>>>(device_src, device_dst, size);
-    //     logger.Stop();
-    // }
+    
+    
+    increment<SHMEM_SIZE><<<grid, block, SHMEM_SIZE>>>(device_src, device_dst, size);
+    
+    for (int i = 0; i < 10; i++)
+    {
+        logger.Start();
+        increment<SHMEM_SIZE><<<grid, block, SHMEM_SIZE>>>(device_src, device_dst, size);
+        logger.Stop();
+    }
 
     cudaMemcpy(host_dst.data(), device_dst, size * sizeof(float), cudaMemcpyDeviceToHost);
 
