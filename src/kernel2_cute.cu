@@ -3,10 +3,7 @@
 #include <cute/tensor.hpp>
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
-
-
-
-
+#include "cute_debug.cuh"
 
 using namespace cute;
 
@@ -53,7 +50,12 @@ __global__ void kernel_2_cute(half* A,
   Tensor D_block_tiles = zipped_divide(D_gmem, CD_block_tile_shape);
 
   Tensor C_block_tile = C_block_tiles(make_coord(_,_), make_coord(blockIdx.y, blockIdx.x));
-  Tensor C_warp_tile = zipped_divide(C_block_tile, CD_warp_tile_shape);
+  Tensor C_warp_tiles = zipped_divide(C_block_tile, CD_warp_tile_shape);
+  Tensor C_warp_tile = C_warp_tiles(make_coord(_,_), make_coord(threadIdx.y, threadIdx.x / 32));
+  if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
+  // {
+  //   inspect_tensor(C_warp_tile, "C_warp_tile");
+  // }
   
   half C_register[4];
   ldmatrix_m16n8_gmem(C_warp_tile.data(), C_register, N * sizeof(half));
@@ -81,7 +83,8 @@ __global__ void kernel_2_cute(half* A,
   }
 
   Tensor D_block_tile = D_block_tiles(make_coord(_,_), make_coord(blockIdx.y, blockIdx.x));
-  Tensor D_warp_tile = zipped_divide(D_block_tile, CD_warp_tile_shape);
+  Tensor D_warp_tiles = zipped_divide(D_block_tile, CD_warp_tile_shape);
+  Tensor D_warp_tile = D_warp_tiles(make_coord(_,_), make_coord(threadIdx.y, threadIdx.x / 32));
   stmatrix_m16n8(D_warp_tile.data(), C_register, N * sizeof(half));
 }
 
@@ -111,8 +114,8 @@ void kernel_2_cute_launch(sgemm_params device_sgemm_params, KernelLogger& timer,
     constexpr unsigned int WARP_SIZE = 32;
     const unsigned int BlocksM = M / BM_dim;
     const unsigned int BlocksN = N / BN_dim;
-    const unsigned int ThreadsM = 1;
-    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N;
+    const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
+    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);

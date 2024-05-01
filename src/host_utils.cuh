@@ -56,7 +56,7 @@ std::pair<sgemm_params, sgemm_params> sgemm_setup(unsigned int M, unsigned int N
     srand(1234);
     for (int i = 0; i < M * N; i++) {
       // C[i] = RAND_HALF();
-      C[i] = 0.0f;
+      C[i] = i;
     }
     for (int i = 0; i < K * N; i++)
     {
