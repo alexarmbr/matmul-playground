@@ -18,7 +18,10 @@ file(GLOB SOURCES "src/kernel*.cu")
 
 add_library(kernels ${SOURCES})
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>)
-target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
+target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
+
+# target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
+target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 target_include_directories(kernels PRIVATE /tmp/cutlass/include)
 
@@ -28,5 +31,4 @@ target_link_libraries(cublas_launch CUDA::cublas)
 add_executable(runner src/main.cu)
 target_link_libraries(runner PUBLIC kernels cublas_launch)
 
-# target_compile_options(async PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
-# target_compile_options(runner PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
+
