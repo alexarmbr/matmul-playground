@@ -61,7 +61,7 @@ __global__ void kernel_2_cute(half* A,
   Tensor A_warp_tiles = zipped_divide(A_smem, A_warp_tile_shape);
   Tensor B_warp_tiles = zipped_divide(B_smem, B_warp_tile_shape);
 
-  // create warp tiles for a,b inside to global memory block tiles, since we only read/write
+  // create warp tiles for c,d inside of global memory block tiles, since we only read/write
   // once, we dont load them into shared memory
   // the coalesce removes a level of nesting
   Tensor C_warp_tiles = coalesce(zipped_divide(C_block_tiles, make_shape(CD_warp_tile_shape)), Step<_1,_1>{});
