@@ -203,3 +203,4 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
     fragment_row += 8;
     reg_[1] = src_ptr[fragment_row * src_stride_bytes + fragment_col];
 }
+

@@ -30,9 +30,12 @@ kernel_4_cute(half* A,
   constexpr unsigned int MMA_N_dim = 8;
   constexpr unsigned int MMA_K_dim = 8;
 
+  // loop bounds
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;
   constexpr unsigned int mma_tiles_per_warp_m = WM_dim / MMA_M_dim;
   constexpr unsigned int mma_tiles_per_warp_n = WN_dim / MMA_N_dim;
+  const unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
+  const unsigned int num_block_tiles_k = K / BK_dim;
   
   const unsigned int block_m = blockIdx.y;
   const unsigned int block_n = blockIdx.x;
@@ -98,6 +101,52 @@ kernel_4_cute(half* A,
       }
   }
 
+  for (unsigned int block_k = 0; block_k < num_block_tiles_k; block_k++)
+  {
+    Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
+    Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
+    tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
+    tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
+    __syncthreads();
+
+    // preload tiles of a into registers
+    for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
+    {
+      half A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
+      for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+      {
+        for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+        {
+          Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
+          ldmatrix_m16n8(A_mma_tile.data().get(), A_register[mma_m][mma_k], BK_dim * sizeof(half));
+        }
+      }
+
+      // load one tile of B at a time, and take outer product between this tile and
+      // entire warp tile of A
+      half B_register[2];
+      for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+      {
+        for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+        {
+          Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(mma_k, mma_n, warp_k, warp_n));
+          ldmatrix_n8k8(B_mma_tile.data().get(), B_register, BN_dim * sizeof(float));
+          B_register[0] *= alpha;
+          B_register[1] *= alpha;
+          for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+          {
+            mma_sync_m16n8k8(
+              C_register[mma_m][mma_n],
+              A_register[mma_m][mma_k],
+              B_register,
+              C_register[mma_m][mma_n]
+            );
+          }
+        }
+      }
+    }
+    __syncthreads();
+  }
 
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
@@ -107,8 +156,6 @@ kernel_4_cute(half* A,
         stmatrix_m16n8(D_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
       }
   }
-
-
 }
 
 void kernel_4_cute_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
