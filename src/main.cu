@@ -24,9 +24,9 @@
     assert(num_iterations > 0);
 
     KernelLogger timer(timer_name);
-    const unsigned int M = 256;
-    const unsigned int N = 128;
-    const unsigned int K = 256;
+    const unsigned int M = 32;
+    const unsigned int N = 16;
+    const unsigned int K = 16;
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup(M, N, K);
     switch (kernel_id) {
@@ -51,8 +51,8 @@
             kernel_2_cute_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 7:
-            device_sgemm_params.alpha = 0.0f;
-            host_sgemm_params.alpha = 0.0f;
+            // device_sgemm_params.alpha = 0.0f;
+            // host_sgemm_params.alpha = 0.0f;
             kernel_4_cute_launch(device_sgemm_params, timer, num_iterations);
             break;
 

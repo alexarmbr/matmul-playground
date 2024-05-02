@@ -52,9 +52,11 @@ kernel_4_cute(half* A,
   auto B_mma_tile_shape = make_shape(Int<MMA_K_dim>{}, Int<MMA_N_dim>{});
   auto CD_mma_tile_shape = make_shape(Int<MMA_M_dim>{}, Int<MMA_N_dim>{});
 
-  extern __shared__ half shmem[];
-  half* A_smem_ = shmem;
-  half* B_smem_ = &shmem[BM_dim * BK_dim];
+  // extern __shared__ half shmem[];
+  // half* A_smem_ = shmem;
+  // half* B_smem_ = &shmem[BM_dim * BK_dim];
+  __shared__ half A_smem_[BM_dim * BK_dim];
+  __shared__ half B_smem_[BK_dim * BN_dim];
 
   Tensor A_gmem = make_tensor(A, make_shape(M, K), LayoutRight{});
   Tensor B_gmem = make_tensor(B, make_shape(K, N), LayoutRight{});
@@ -130,6 +132,13 @@ kernel_4_cute(half* A,
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
           Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(mma_k, mma_n, warp_k, warp_n));
+          // if (threadIdx.x == 0 & threadIdx.y == 0 & blockIdx.x == 0 & blockIdx.y == 0)
+          // {
+          //   printf("mma k: %d, mma n: %d\n", mma_k, mma_n);
+          //   inspect_tensor(B_mma_tile);
+          //   inspect_tensor(B_mma_tiles);
+          //   assert(false);
+          // }
           ldmatrix_n8k8(B_mma_tile.data().get(), B_register, BN_dim * sizeof(float));
           B_register[0] *= alpha;
           B_register[1] *= alpha;
@@ -161,13 +170,13 @@ kernel_4_cute(half* A,
 void kernel_4_cute_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
-    constexpr unsigned int BM_dim = 128;
-    constexpr unsigned int BN_dim = 128;
-    constexpr unsigned int BK_dim = 64;
+    constexpr unsigned int BM_dim = 32;
+    constexpr unsigned int BN_dim = 16;
+    constexpr unsigned int BK_dim = 16;
     
     constexpr unsigned int WARPS_PER_BLOCK_M = 2;
     constexpr unsigned int WARPS_PER_BLOCK_N = 2;
-    constexpr unsigned int WARPS_PER_BLOCK_K = 4;
+    constexpr unsigned int WARPS_PER_BLOCK_K = 2;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
     constexpr unsigned int WN_dim = BM_dim / WARPS_PER_BLOCK_N;
@@ -184,16 +193,16 @@ void kernel_4_cute_launch(sgemm_params device_sgemm_params, KernelLogger& timer,
     constexpr unsigned int WARP_SIZE = 32;
     const unsigned int BlocksM = M / BM_dim;
     const unsigned int BlocksN = N / BN_dim;
-    const unsigned int ThreadsM = 1;
-    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N;
+    const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
+    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
     const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_4_cute<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>,
-    cudaFuncAttributeMaxDynamicSharedMemorySize,
-    65536)); // set shared memory limit to 64KB which is maximum for sm_75
+    // CUDA_CHECK(cudaFuncSetAttribute(kernel_4_cute<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>,
+    // cudaFuncAttributeMaxDynamicSharedMemorySize,
+    // 65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
