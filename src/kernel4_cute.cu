@@ -34,7 +34,11 @@ kernel_4_cute(half* A,
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;
   constexpr unsigned int mma_tiles_per_warp_m = WM_dim / MMA_M_dim;
   constexpr unsigned int mma_tiles_per_warp_n = WN_dim / MMA_N_dim;
+  
+  constexpr unsigned int warp_tiles_per_block_m = BM_dim / WM_dim;
+  constexpr unsigned int warp_tiles_per_block_n = BN_dim / WN_dim;
   const unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
+
   const unsigned int num_block_tiles_k = K / BK_dim;
   
   const unsigned int block_m = blockIdx.y;
@@ -42,24 +46,26 @@ kernel_4_cute(half* A,
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
 
-  auto A_block_tile_shape = make_shape(Int<BM_dim>{}, Int<BK_dim>{});
-  auto B_block_tile_shape = make_shape(Int<BK_dim>{}, Int<BN_dim>{});
+  auto A_block_tile_shape = make_shape(
+    Int<warp_tiles_per_block_m * mma_tiles_per_warp_m>{},
+    Int<warp_tiles_per_block_k * mma_tiles_per_warp_k * MMA_M_dim * MMA_K_dim>{});
+  
+    auto B_block_tile_shape = make_shape(
+    Int<warp_tiles_per_block_k * mma_tiles_per_warp_k>{},
+    Int<warp_tiles_per_block_n * mma_tiles_per_warp_n * MMA_K_dim * MMA_N_dim>{});
   auto CD_block_tile_shape = make_shape(Int<BM_dim>{}, Int<BN_dim>{});
-  auto A_warp_tile_shape = make_shape(Int<WM_dim>{}, Int<WK_dim>{});
-  auto B_warp_tile_shape = make_shape(Int<WK_dim>{}, Int<WN_dim>{});
+  
+  auto A_warp_tile_shape = make_shape(Int<mma_tiles_per_warp_m>{}, Int<mma_tiles_per_warp_k * MMA_M_dim * MMA_K_dim>{});
+  auto B_warp_tile_shape = make_shape(Int<mma_tiles_per_warp_k>{}, Int<mma_tiles_per_warp_n * MMA_K_dim * MMA_N_dim>{});
   auto CD_warp_tile_shape = make_shape(Int<WM_dim>{}, Int<WN_dim>{});
-  auto A_mma_tile_shape = make_shape(Int<MMA_M_dim>{}, Int<MMA_K_dim>{});
-  auto B_mma_tile_shape = make_shape(Int<MMA_K_dim>{}, Int<MMA_N_dim>{});
+  
+  // auto A_mma_tile_shape = make_shape(Int<MMA_M_dim>{}, Int<MMA_K_dim>{});
+  // auto B_mma_tile_shape = make_shape(Int<MMA_K_dim>{}, Int<MMA_N_dim>{});
+  auto A_mma_tile_shape = make_shape(Int<MMA_M_dim * MMA_K_dim>{});
+  auto B_mma_tile_shape = make_shape(Int<MMA_K_dim * MMA_N_dim>{});
   auto CD_mma_tile_shape = make_shape(Int<MMA_M_dim>{}, Int<MMA_N_dim>{});
-  // auto A_block_tile_shape = make_shape(BM_dim, BK_dim);
-  // auto B_block_tile_shape = make_shape(BK_dim, BN_dim);
-  // auto CD_block_tile_shape = make_shape(BM_dim, BN_dim);
-  // auto A_warp_tile_shape = make_shape(WM_dim, WK_dim);
-  // auto B_warp_tile_shape = make_shape(WK_dim, WN_dim);
-  // auto CD_warp_tile_shape = make_shape(WM_dim, WN_dim);
-  // auto A_mma_tile_shape = make_shape(MMA_M_dim, MMA_K_dim);
-  // auto B_mma_tile_shape = make_shape(MMA_K_dim, MMA_N_dim);
-  // auto CD_mma_tile_shape = make_shape(MMA_M_dim, MMA_N_dim);
+
+
 
   extern __shared__ half shmem[];
   half* A_smem_ = shmem;
@@ -117,9 +123,10 @@ kernel_4_cute(half* A,
   {
     Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-    tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
+    // tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
     // tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
-    tileMemcpyTranspose<BK_dim, BN_dim>(B_block_tile, B_smem);
+    tileMemcpyTranspose<BM_dim, BK_dim>(A_block_tile, A_smem, K);
+    tileMemcpyTranspose<BK_dim, BN_dim>(B_block_tile, B_smem, N);
     __syncthreads();
 
     // preload tiles of a into registers
@@ -130,8 +137,8 @@ kernel_4_cute(half* A,
       {
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
         {
-          Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
-          ldmatrix_m16n8(A_mma_tile.data().get(), A_register[mma_m][mma_k], BK_dim * sizeof(half));
+          Tensor A_mma_tile = A_mma_tiles(make_coord(_), make_coord(mma_m, mma_k, warp_m, warp_k));
+          ldmatrix_m16n8(A_mma_tile.data().get(), A_register[mma_m][mma_k], sizeof(float4));
           // if (threadIdx.x == 0)
           // {
           //   printf("mma m, mma k: %d, %d\n", mma_m, mma_k);
@@ -147,13 +154,13 @@ kernel_4_cute(half* A,
       {
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
-          Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(mma_k, mma_n, warp_k, warp_n));
+          Tensor B_mma_tile = B_mma_tiles(make_coord(_), make_coord(mma_k, mma_n, warp_k, warp_n));
           // if (threadIdx.x == 0)
           // {
           //   printf("mma k, mma n: %d, %d\n", mma_k, mma_n);
           //   inspect_tensor(B_mma_tile);
           // }
-          ldmatrix_n8k8(B_mma_tile.data().get(), B_register, BN_dim * sizeof(half));
+          ldmatrix_n8k8(B_mma_tile.data().get(), B_register, sizeof(float4));
           B_register[0] *= alpha;
           B_register[1] *= alpha;
           for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)

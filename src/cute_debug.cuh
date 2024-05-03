@@ -24,7 +24,7 @@ __device__ void inspect_tensor(Tensor<Engine, Layout> T, const char *name = "")
 }
 
 template <int ROWS, int COLS, class TensorSrc, class TensorDst>
-__device__ void tileMemcpyTranspose(TensorSrc src, TensorDst dst)
+__device__ void tileMemcpyTranspose(TensorSrc src, TensorDst dst, const unsigned int src_stride_elements)
 {
     // assert(size<0>(src) == ROWS);
     // assert(size<1>(src) == COLS);
@@ -33,16 +33,16 @@ __device__ void tileMemcpyTranspose(TensorSrc src, TensorDst dst)
     // assert(COLS % 4 == 0);
     int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * blockDim.y;
-    // Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(src.data()), make_shape(ROWS, COLS/8), LayoutRight{});
-    // Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(dst.data().get()), make_shape(ROWS, COLS/8), LayoutRight{});
-    // while (thread_idx < src_float4.size())
-    // {
-    //   dst_float4(thread_idx) = src_float4(thread_idx);
-    //   thread_idx += num_threads;
-    // }
-    while (thread_idx < src.size())
+    Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(src.data()), make_shape(ROWS, COLS/8), make_stride(src_stride_elements / 8, 1));
+    Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(dst.data().get()), make_shape(COLS/8, ROWS), LayoutLeft{});
+    while (thread_idx < src_float4.size())
     {
-      dst(thread_idx) = src(thread_idx);
+      dst_float4(thread_idx) = src_float4(thread_idx);
       thread_idx += num_threads;
     }
+    // while (thread_idx < src.size())
+    // {
+    //   dst(thread_idx) = src(thread_idx);
+    //   thread_idx += num_threads;
+    // }
 }
