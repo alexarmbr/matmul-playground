@@ -55,19 +55,19 @@ std::pair<sgemm_params, sgemm_params> sgemm_setup(unsigned int M, unsigned int N
     // fill host matrices with random elements
     srand(1234);
     for (int i = 0; i < M * N; i++) {
-      // C[i] = RAND_HALF();
+      C[i] = RAND_HALF();
       // C[i] = i;
-      C[i] = 0;
+      // C[i] = 0;
     }
     for (int i = 0; i < K * N; i++)
     {
-      // B[i] = RAND_HALF();
-      B[i] = (half) i;
+      B[i] = RAND_HALF();
+      // B[i] = (half) i;
     }
     for (int i = 0; i < M * K; i++)
     {
-      // A[i] = RAND_HALF();
-      A[i] = (half) i;
+      A[i] = RAND_HALF();
+      // A[i] = (half) i;
     }
     
     // copy to device

@@ -2,7 +2,6 @@
 #include <cuda.h>
 #include <assert.h>
 
-
 template<unsigned int TILE_ROWS,
 unsigned int TILE_COLS>
 __device__ void tileMemcpyTranspose(
