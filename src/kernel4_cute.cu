@@ -110,10 +110,8 @@ kernel_4_cute(half* A,
   {
     Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-    // tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
-    // tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
-    tileMemcpyTranspose<BM_dim, BK_dim>(A_block_tile, A_smem, K);
-    tileMemcpyTranspose<BK_dim, BN_dim>(B_block_tile, B_smem, N);
+    tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
+    tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
     __syncthreads();
 
     // preload tiles of a into registers
@@ -125,12 +123,7 @@ kernel_4_cute(half* A,
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
         {
           Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
-          ldmatrix_m16n8(A_mma_tile.data().get(), A_register[mma_m][mma_k], sizeof(float4));
-          // if (threadIdx.x == 0)
-          // {
-          //   printf("mma m, mma k: %d, %d\n", mma_m, mma_k);
-          //   inspect_tensor(A_mma_tile);
-          // }
+          ldmatrix_m16n8(A_mma_tile.data().get(), A_register[mma_m][mma_k], BK_dim * sizeof(half));
         }
       }
 
@@ -142,12 +135,7 @@ kernel_4_cute(half* A,
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
           Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(mma_k, mma_n, warp_k, warp_n));
-          // if (threadIdx.x == 0)
-          // {
-          //   printf("mma k, mma n: %d, %d\n", mma_k, mma_n);
-          //   inspect_tensor(B_mma_tile);
-          // }
-          ldmatrix_n8k8(B_mma_tile.data().get(), B_register, sizeof(float4));
+          ldmatrix_n8k8(B_mma_tile.data().get(), B_register, BN_dim * sizeof(half));
           B_register[0] *= alpha;
           B_register[1] *= alpha;
           for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
