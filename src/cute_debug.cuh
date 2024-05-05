@@ -26,11 +26,6 @@ __device__ void inspect_tensor(Tensor<Engine, Layout> T, const char *name = "")
 template <int ROWS, int COLS, class TensorSrc, class TensorDst>
 __device__ void tileMemcpyTranspose(TensorSrc src, TensorDst dst, const unsigned int src_stride_elements)
 {
-    // assert(size<0>(src) == ROWS);
-    // assert(size<1>(src) == COLS);
-    // assert(size<1>(dst) == ROWS);
-    // assert(size<0>(dst) == COLS);
-    // assert(COLS % 4 == 0);
     int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * blockDim.y;
     Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(src.data()), make_shape(ROWS, COLS/8), make_stride(src_stride_elements / 8, 1));
@@ -40,9 +35,21 @@ __device__ void tileMemcpyTranspose(TensorSrc src, TensorDst dst, const unsigned
       dst_float4(thread_idx) = src_float4(thread_idx);
       thread_idx += num_threads;
     }
-    // while (thread_idx < src.size())
-    // {
-    //   dst(thread_idx) = src(thread_idx);
-    //   thread_idx += num_threads;
-    // }
+}
+
+template <int ROWS, int COLS, class TensorSrc, class TensorDst>
+__device__ void tileMemcpySwizzle(TensorSrc src, TensorDst dst, const unsigned int src_stride_elements)
+{
+    int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+    int num_threads = blockDim.x * blockDim.y;
+    Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(src.data()), make_shape(ROWS, COLS/8), make_stride(src_stride_elements / 8, 1));
+    const int swizzle_bits = log2(COLS/8);
+    auto swizzled_layout = composition(Swizzle<3,0,4>{}, src_float4.layout());
+    Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(dst.data().get()), swizzled_layout);
+    
+    while (thread_idx < src_float4.size())
+    {
+      dst_float4(thread_idx) = src_float4(thread_idx);
+      thread_idx += num_threads;
+    }
 }
