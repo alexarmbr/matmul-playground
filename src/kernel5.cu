@@ -4,7 +4,7 @@
 
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
-#include "cute_debug.cuh"
+#include "cute_utils.cuh"
 
 using namespace cute;
 
@@ -13,7 +13,9 @@ unsigned int BN_dim,
 unsigned int BK_dim,
 unsigned int WM_dim,
 unsigned int WN_dim,
-unsigned int WK_dim>
+unsigned int WK_dim,
+unsigned int A_swizzle_bits,
+unsigned int B_swizzle_bits>
 __global__ void
 kernel_5(half* A,
   half* B,
@@ -65,8 +67,11 @@ kernel_5(half* A,
   Tensor C_gmem = make_tensor(C, make_shape(M, N), LayoutRight{});
   Tensor D_gmem = make_tensor(D, make_shape(M, N), LayoutRight{});
 
-  Tensor A_smem = make_tensor(make_smem_ptr(A_smem_), A_block_tile_shape, LayoutRight{});
-  Tensor B_smem = make_tensor(make_smem_ptr(B_smem_), B_block_tile_shape, LayoutRight{});
+  
+  auto A_smem_layout = composition(Swizzle<3, 3, A_swizzle_bits>{}, make_layout(A_block_tile_shape, LayoutRight{}));
+  auto B_smem_layout = composition(Swizzle<3, 3, B_swizzle_bits>{}, make_layout(B_block_tile_shape, LayoutRight{}));
+  Tensor A_smem = make_tensor(make_smem_ptr(A_smem_), A_smem_layout);
+  Tensor B_smem = make_tensor(make_smem_ptr(B_smem_), B_smem_layout);
 
   // block tile each matrix
   Tensor A_block_tiles = zipped_divide(A_gmem, A_block_tile_shape);
@@ -112,8 +117,8 @@ kernel_5(half* A,
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
     // tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
     // tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
-    tileMemcpySwizzle<BM_dim, BK_dim, 3>(A_block_tile, A_smem, K);
-    tileMemcpySwizzle<BK_dim, BN_dim, 4>(B_block_tile, B_smem, N);
+    tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K);
+    tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N);
 
     __syncthreads();
 
@@ -195,11 +200,13 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
     const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
     const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+    constexpr unsigned int A_swizzle_bits = int_log2(BK_dim);
+    constexpr unsigned int B_swizzle_bits = int_log2(BN_dim);
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_5<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_5<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
@@ -208,7 +215,7 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
         timer.Start();
         kernel_5
         <BM_dim, BN_dim, BK_dim,
-        WM_dim, WN_dim, WK_dim>
+        WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>
         <<<gridDim, blockDim, shmem_bytes>>>(
             device_sgemm_params.A,
             device_sgemm_params.B,

@@ -3,7 +3,7 @@
 #include <cute/tensor.hpp>
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
-#include "cute_debug.cuh"
+#include "cute_utils.cuh"
 
 using namespace cute;
 
