@@ -77,8 +77,6 @@ __device__ __forceinline__ void ldmatrix_m16n8(
   uint32_t (&reg_) [2] = reinterpret_cast<uint32_t(&)[2]>(reg);
   constexpr int frag_M_dim = 16;
   const unsigned int fragment_row = threadIdx.x % frag_M_dim;
-  // const unsigned int offset = fragment_row * shmem_stride_bytes;
-  // uint32_t* smem_ptr = reinterpret_cast<uint32_t*>(shmem) + offset;
   half* smem_ptr = &T(fragment_row, 0);
   
   asm volatile (
@@ -89,23 +87,21 @@ __device__ __forceinline__ void ldmatrix_m16n8(
   );
 }
 
-// __device__ __forceinline__ void ldmatrix_n8k8(
-//   half* shmem,
-//   half (&reg)[2],
-//   unsigned int shmem_stride_bytes
-// )
-// {
-//   shmem_stride_bytes /= sizeof(uint32_t);
-//   uint32_t &reg_ = reinterpret_cast<uint32_t&>(reg);
-//   constexpr int frag_K_dim = 8;
-//   const unsigned int fragment_row = threadIdx.x % frag_K_dim;
-//   const unsigned int offset = fragment_row * shmem_stride_bytes;
-//   uint32_t* smem_ptr = reinterpret_cast<uint32_t*>(shmem) + offset;
+template <class Tensor>
+__device__ __forceinline__ void ldmatrix_n8k8(
+  Tensor T,
+  half (&reg)[2]
+)
+{
+  uint32_t &reg_ = reinterpret_cast<uint32_t&>(reg);
+  constexpr int frag_K_dim = 8;
+  const unsigned int fragment_row = threadIdx.x % frag_K_dim;
+  half* smem_ptr = &T(fragment_row, 0);
 
-//   asm volatile (
-//       "ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 "
-//       "{%0}, [%1];"
-//       : "=r"(reg_)
-//       : "r"(cvta_to_shared_u32(smem_ptr))
-//   );
-// }
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 "
+      "{%0}, [%1];"
+      : "=r"(reg_)
+      : "r"(cvta_to_shared_u32(smem_ptr))
+  );
+}

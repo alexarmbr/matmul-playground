@@ -143,7 +143,7 @@ kernel_5(half* A,
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
           Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(mma_k, mma_n, warp_k, warp_n));
-          ldmatrix_n8k8(B_mma_tile.data().get(), B_register, BN_dim * sizeof(half));
+          ldmatrix_n8k8(B_mma_tile, B_register);
           B_register[0] *= alpha;
           B_register[1] *= alpha;
           for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
@@ -174,13 +174,13 @@ kernel_5(half* A,
 void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
-  constexpr unsigned int BM_dim = 128;
+  constexpr unsigned int BM_dim = 256;
   constexpr unsigned int BN_dim = 128;
-  constexpr unsigned int BK_dim = 64;
+  constexpr unsigned int BK_dim = 32;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 2;
   constexpr unsigned int WARPS_PER_BLOCK_N = 2;
-  constexpr unsigned int WARPS_PER_BLOCK_K = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_K = 2;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
     constexpr unsigned int WN_dim = BN_dim / WARPS_PER_BLOCK_N;
