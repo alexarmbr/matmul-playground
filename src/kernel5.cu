@@ -131,7 +131,7 @@ kernel_5(half* A,
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
         {
           Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
-          ldmatrix_m16n8(A_mma_tile.data().get(), A_register[mma_m][mma_k], BK_dim * sizeof(half));
+          ldmatrix_m16n8(A_mma_tile, A_register[mma_m][mma_k]);
         }
       }
 
