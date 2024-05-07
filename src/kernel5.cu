@@ -174,12 +174,12 @@ kernel_5(half* A,
 void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
-  constexpr unsigned int BM_dim = 256;
+  constexpr unsigned int BM_dim = 128;
   constexpr unsigned int BN_dim = 128;
-  constexpr unsigned int BK_dim = 32;
+  constexpr unsigned int BK_dim = 64;
   
-  constexpr unsigned int WARPS_PER_BLOCK_M = 2;
-  constexpr unsigned int WARPS_PER_BLOCK_N = 2;
+  constexpr unsigned int WARPS_PER_BLOCK_M = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_N = 4;
   constexpr unsigned int WARPS_PER_BLOCK_K = 2;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
@@ -200,8 +200,8 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
     const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
     const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
-    constexpr unsigned int A_swizzle_bits = int_log2(BK_dim);
-    constexpr unsigned int B_swizzle_bits = int_log2(BN_dim);
+    constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
+    constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
