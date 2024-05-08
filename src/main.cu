@@ -6,12 +6,13 @@
     void kernel_3_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     void kernel_4_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
+    void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     void kernel_2_cute_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     void kernel_4_cute_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     void cublas_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
 
   int main(int argc, char **argv) {
-    bool check_on_cpu = false;
+    bool check_on_cpu = true;
     
     if (argc != 3) {
         std::cerr << "Usage: " << argv[0] << " <kernel_id> <num_iterations>" << std::endl;
@@ -24,12 +25,12 @@
     assert(num_iterations > 0);
 
     KernelLogger timer(timer_name);
-    // const unsigned int M = 256;
-    // const unsigned int N = 256;
-    // const unsigned int K = 128;
-    const unsigned int M = 4096;
-    const unsigned int N = 4096;
-    const unsigned int K = 4096;
+    const unsigned int M = 256;
+    const unsigned int N = 256;
+    const unsigned int K = 128;
+    // const unsigned int M = 4096;
+    // const unsigned int N = 4096;
+    // const unsigned int K = 4096;
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup(M, N, K);
     switch (kernel_id) {
@@ -49,16 +50,8 @@
             kernel_5_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 6:
-            // device_sgemm_params.alpha = 0.0f;
-            // host_sgemm_params.alpha = 0.0f;
-            kernel_2_cute_launch(device_sgemm_params, timer, num_iterations);
+            kernel_6_launch(device_sgemm_params, timer, num_iterations);
             break;
-        case 7:
-            // device_sgemm_params.alpha = 0.0f;
-            // host_sgemm_params.alpha = 0.0f;
-            kernel_4_cute_launch(device_sgemm_params, timer, num_iterations);
-            break;
-
         case 11:
             cublas_launch(device_sgemm_params, timer, num_iterations);
             break;
