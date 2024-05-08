@@ -20,7 +20,7 @@ __device__ void inspect_tensor(Tensor<Engine, Layout> T, const char *name = "")
         printf("%s\n", name);
     }
 
-    printf("threadIdx.x: %d, threadIdx.y: %d, blockIdx.x: %d, blockIdx.y: %d\n", threadIdx.x, threadIdx.y, blockIdx.x, blockIdx.y);
+    // printf("threadIdx.x: %d, threadIdx.y: %d, blockIdx.x: %d, blockIdx.y: %d\n", threadIdx.x, threadIdx.y, blockIdx.x, blockIdx.y);
     print(T.layout());
     printf("\n");
     for (int i = 0; i < size<0>(T); i++)
@@ -62,8 +62,13 @@ __device__ void tileMemcpySwizzle(TensorSrc src, TensorDst dst, const unsigned i
     {
       const unsigned int thread_idx_y = thread_idx / float4_cols;
       const unsigned int thread_idx_x = thread_idx % float4_cols;
+      half* addr = reinterpret_cast<half*>(&dst_float4(thread_idx_y, thread_idx_x));
       dst_float4(thread_idx_y, thread_idx_x) = src_float4(thread_idx_y, thread_idx_x);
       thread_idx += num_threads;
+    }
+    if (thread0())
+    {
+      inspect_tensor(dst, "dst");
     }
 }
 
