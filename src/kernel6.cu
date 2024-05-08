@@ -82,8 +82,8 @@ kernel_6(half* A,
   Tensor C_block_tiles = zipped_divide(C_gmem, CD_block_tile_shape);
   Tensor D_block_tiles = zipped_divide(D_gmem, CD_block_tile_shape);
 
-  Tensor A_block_fragments_gmem = zipped_divide(A_block_tiles, A_block_fragment_shape);
-  Tensor B_block_fragments_gmem = zipped_divide(B_block_tiles, B_block_fragment_shape);
+  Tensor A_block_fragments_gmem = coalesce(zipped_divide(A_block_tiles, make_shape(A_block_fragment_shape, make_shape(Int<1>{}, Int<1>{}))), Step<_1,Step<>>{});
+  Tensor B_block_fragments_gmem = coalesce(zipped_divide(A_block_tiles, make_shape(A_block_fragment_shape, make_shape(Int<1>{}, Int<1>{}))), Step<_1,Step<>>{});
   Tensor A_block_fragments_smem = zipped_divide(A_smem, A_block_fragment_shape);
   Tensor B_block_fragments_smem = zipped_divide(B_smem, B_block_fragment_shape);
   
@@ -101,7 +101,8 @@ kernel_6(half* A,
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
-  // declare register storage to hold fragments of C which we will accumulate into
+
+  // prologue, load c from global memory into registers, and prefetch the first fragment of a,b
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
@@ -118,19 +119,29 @@ kernel_6(half* A,
       }
   }
 
-  for (unsigned int block_k = 0; block_k < num_block_tiles_k; block_k++)
+  Tensor A_block_fragment_gmem = A_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_m, 0), make_coord(0,0)));
+  Tensor B_block_fragment_gmem = B_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(0, block_n), make_coord(0,0)));
+  Tensor A_block_fragment_smem = A_block_fragments_smem(make_coord(_,_), make_coord(0,0));
+  Tensor B_block_fragment_smem = B_block_fragments_smem(make_coord(_,_), make_coord(0,0));
+  tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_fragment_gmem, A_block_fragment_smem, K);
+  tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_fragment_gmem, B_block_fragment_smem, N);
+  __syncthreads();
+
+  for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
     // Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
     // Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-    // Tensor A_block_fragment_gmem = A_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_m, block_k), make_coord(0,0)));
-    // Tensor B_block_fragment_gmem = B_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_k, block_n), make_coord(0,0)));
-    Tensor A_block_fragment_smem = A_block_fragments_smem(make_coord(_,_), make_coord(0,0));
-    Tensor B_block_fragment_smem = B_block_fragments_smem(make_coord(_,_), make_coord(0,0));
+    if (block_k != num_block_tiles_k)
+    {
+      Tensor A_block_fragment_gmem = A_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_m, block_k), make_coord(block_k % 2, 0)));
+      Tensor B_block_fragment_gmem = B_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_k, block_n), make_coord(0,block_k % 2)));
+      Tensor A_block_fragment_smem = A_block_fragments_smem(make_coord(_,_), make_coord(block_k % 2,0));
+      Tensor B_block_fragment_smem = B_block_fragments_smem(make_coord(_,_), make_coord(0,block_k % 2));
 
-    // tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_fragment_gmem, A_block_fragment_smem, K);
-    // tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_fragment_gmem, B_block_fragment_smem, N);
-
-    __syncthreads();
+      tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_fragment_gmem, A_block_fragment_smem, K);
+      tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_fragment_gmem, B_block_fragment_smem, N);
+    }
+    // __syncthreads();
 
     // preload tiles of a into registers
     for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
@@ -141,7 +152,7 @@ kernel_6(half* A,
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
         {
           // Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
-          Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(make_coord(warp_m, warp_k), make_coord(0,0))));
+          Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(make_coord(warp_m, warp_k), make_coord((block_k-1) % 2,0))));
           ldmatrix_m16n8(A_mma_tile, A_register[mma_m][mma_k]);
         }
       }
@@ -154,7 +165,7 @@ kernel_6(half* A,
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
           // Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(mma_k, mma_n, warp_k, warp_n));
-          Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(make_coord(warp_k, warp_n), make_coord(0,0))));
+          Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(make_coord(warp_k, warp_n), make_coord(0,(block_k-1) % 2))));
           ldmatrix_n8k8(B_mma_tile, B_register);
           B_register[0] *= alpha;
           B_register[1] *= alpha;
