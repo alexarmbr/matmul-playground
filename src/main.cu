@@ -25,8 +25,8 @@
     assert(num_iterations > 0);
 
     KernelLogger timer(timer_name);
-    const unsigned int M = 256;
-    const unsigned int N = 256;
+    const unsigned int M = 128;
+    const unsigned int N = 128;
     const unsigned int K = 128;
     // const unsigned int M = 4096;
     // const unsigned int N = 4096;

@@ -48,14 +48,14 @@ __device__ void tileMemcpyTranspose(TensorSrc src, TensorDst dst, const unsigned
 }
 
 template <int ROWS, int COLS, int SWIZZLE_BITS, class TensorSrc, class TensorDst>
-__device__ void tileMemcpySwizzle(TensorSrc src, TensorDst dst, const unsigned int src_stride_elements)
+__device__ void tileMemcpySwizzle(TensorSrc src, TensorDst dst, const unsigned int src_stride_elements, const unsigned int dst_stride_elements)
 {
     assert(COLS % 8 == 0);
     constexpr int float4_cols = COLS / 8;
     int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * blockDim.y;
     Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(src.data()), make_shape(ROWS, float4_cols), make_stride(src_stride_elements / 8, 1));
-    auto swizzled_layout = composition(Swizzle<3,0,SWIZZLE_BITS>{}, make_layout(make_shape(ROWS, float4_cols), make_stride(float4_cols, 1)));
+    auto swizzled_layout = composition(Swizzle<3,0,SWIZZLE_BITS>{}, make_layout(make_shape(ROWS, float4_cols), make_stride(dst_stride_elements / 8, 1)));
     Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(dst.data().get()), swizzled_layout);
     
     while (thread_idx < src_float4.size())

@@ -11,6 +11,7 @@ using namespace cute;
 template <unsigned int BM_dim,
 unsigned int BN_dim,
 unsigned int BK_dim,
+unsigned int BK_fragment_dim,
 unsigned int WM_dim,
 unsigned int WN_dim,
 unsigned int WK_dim,
@@ -28,10 +29,6 @@ kernel_6(half* A,
   unsigned int K)
 {
 
-  constexpr unsigned int BM_fragment_dim = BM_dim / 2;
-  constexpr unsigned int BN_fragment_dim = BN_dim / 2;
-  constexpr unsigned int BK_fragment_dim = BK_dim;
-
   constexpr unsigned int MMA_M_dim = 16;
   constexpr unsigned int MMA_N_dim = 8;
   constexpr unsigned int MMA_K_dim = 8;
@@ -40,7 +37,7 @@ kernel_6(half* A,
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;
   constexpr unsigned int mma_tiles_per_warp_m = WM_dim / MMA_M_dim;
   constexpr unsigned int mma_tiles_per_warp_n = WN_dim / MMA_N_dim;
-  const unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
+  const unsigned int warp_tiles_per_fragment_k = BK_fragment_dim / WK_dim;
   const unsigned int num_block_tiles_k = K / BK_dim;
   
   const unsigned int block_m = blockIdx.y;
@@ -52,8 +49,8 @@ kernel_6(half* A,
   auto B_block_tile_shape = make_shape(Int<BK_dim>{}, Int<BN_dim>{});
   auto CD_block_tile_shape = make_shape(Int<BM_dim>{}, Int<BN_dim>{});
 
-  auto A_block_fragment_shape = make_shape(Int<BM_fragment_dim>{}, Int<BK_fragment_dim>{});
-  auto B_block_fragment_shape = make_shape(Int<BK_fragment_dim>{}, Int<BN_fragment_dim>{});
+  auto A_block_fragment_shape = make_shape(Int<BM_dim>{}, Int<BK_fragment_dim>{});
+  auto B_block_fragment_shape = make_shape(Int<BK_fragment_dim>{}, Int<BN_dim>{});
 
   auto A_warp_tile_shape = make_shape(make_shape(Int<WM_dim>{}, Int<WK_dim>{}), make_shape(Int<1>{}, Int<1>{}));
   auto B_warp_tile_shape = make_shape(make_shape(Int<WK_dim>{}, Int<WN_dim>{}), make_shape(Int<1>{}, Int<1>{}));
@@ -101,6 +98,27 @@ kernel_6(half* A,
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
+  if (thread0())
+  {
+    printf("a gmem: \n");
+    print(A_gmem.layout());
+    printf("\n a smem: \n");
+    print(A_smem.layout());
+    printf("\n a block tiles: \n");
+    print(A_block_tiles.layout());
+    printf("\n a block fragments gmem: \n");
+    print(A_block_fragments_gmem.layout());
+    printf("\n a block fragments smem: \n");
+    print(A_block_fragments_smem.layout());
+    printf("\n a warp tiles: \n");
+    print(A_warp_tiles.layout());
+    printf("\n a mma tiles: \n");
+    print(A_mma_tiles.layout());
+  }
+
+
+
+
 
   // prologue, load c from global memory into registers, and prefetch the first fragment of a,b
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
@@ -123,9 +141,17 @@ kernel_6(half* A,
   Tensor B_block_fragment_gmem = B_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(0, block_n), make_coord(0,0)));
   Tensor A_block_fragment_smem = A_block_fragments_smem(make_coord(_,_), make_coord(0,0));
   Tensor B_block_fragment_smem = B_block_fragments_smem(make_coord(_,_), make_coord(0,0));
-  tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_fragment_gmem, A_block_fragment_smem, K);
-  tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_fragment_gmem, B_block_fragment_smem, N);
+  tileMemcpySwizzle<BM_dim, BK_fragment_dim, A_swizzle_bits>(A_block_fragment_gmem, A_block_fragment_smem, K, BK_dim);
+  tileMemcpySwizzle<BK_fragment_dim, BN_dim, B_swizzle_bits>(B_block_fragment_gmem, B_block_fragment_smem, N, BN_dim);
   __syncthreads();
+
+  // if (thread0())
+  // {
+  //   printf("a gmem \n");
+  //   // inspect_tensor(A_block_fragment_gmem);
+  //   // printf("\n a smem \n");
+  //   // inspect_tensor(A_block_fragment_smem);
+  // }
 
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
@@ -133,18 +159,18 @@ kernel_6(half* A,
     // Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
     if (block_k != num_block_tiles_k)
     {
-      Tensor A_block_fragment_gmem = A_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_m, block_k), make_coord(block_k % 2, 0)));
-      Tensor B_block_fragment_gmem = B_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_k, block_n), make_coord(0,block_k % 2)));
-      Tensor A_block_fragment_smem = A_block_fragments_smem(make_coord(_,_), make_coord(block_k % 2,0));
-      Tensor B_block_fragment_smem = B_block_fragments_smem(make_coord(_,_), make_coord(0,block_k % 2));
+      Tensor A_block_fragment_gmem = A_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_m, block_k), make_coord(0, block_k % 2)));
+      Tensor B_block_fragment_gmem = B_block_fragments_gmem(make_coord(_,_), make_coord(make_coord(block_k, block_n), make_coord(block_k % 2, 0)));
+      Tensor A_block_fragment_smem = A_block_fragments_smem(make_coord(_,_), make_coord(0, block_k % 2));
+      Tensor B_block_fragment_smem = B_block_fragments_smem(make_coord(_,_), make_coord(block_k % 2, 0));
 
-      tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_fragment_gmem, A_block_fragment_smem, K);
-      tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_fragment_gmem, B_block_fragment_smem, N);
+      tileMemcpySwizzle<BM_dim, BK_fragment_dim, A_swizzle_bits>(A_block_fragment_gmem, A_block_fragment_smem, K, BK_dim);
+      tileMemcpySwizzle<BK_fragment_dim, BN_dim, B_swizzle_bits>(B_block_fragment_gmem, B_block_fragment_smem, N, BN_dim);
     }
     // __syncthreads();
 
     // preload tiles of a into registers
-    for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
+    for (unsigned int warp_k = 0; warp_k < warp_tiles_per_fragment_k; warp_k++)
     {
       half A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
       for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
@@ -152,7 +178,7 @@ kernel_6(half* A,
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
         {
           // Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
-          Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(make_coord(warp_m, warp_k), make_coord((block_k-1) % 2,0))));
+          Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(make_coord(warp_m, warp_k), make_coord(0, (block_k-1) % 2))));
           ldmatrix_m16n8(A_mma_tile, A_register[mma_m][mma_k]);
         }
       }
@@ -165,7 +191,7 @@ kernel_6(half* A,
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
           // Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(mma_k, mma_n, warp_k, warp_n));
-          Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(make_coord(warp_k, warp_n), make_coord(0,(block_k-1) % 2))));
+          Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(make_coord(warp_k, warp_n), make_coord((block_k-1) % 2, 0))));
           ldmatrix_n8k8(B_mma_tile, B_register);
           B_register[0] *= alpha;
           B_register[1] *= alpha;
@@ -199,7 +225,8 @@ void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     
   constexpr unsigned int BM_dim = 128;
   constexpr unsigned int BN_dim = 128;
-  constexpr unsigned int BK_dim = 64;
+  constexpr unsigned int BK_dim = 128;
+  constexpr unsigned int BK_fragment_dim = 64;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 4;
   constexpr unsigned int WARPS_PER_BLOCK_N = 4;
@@ -223,13 +250,13 @@ void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
     const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
     const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
-    constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
+    constexpr unsigned int A_swizzle_bits = int_log2(BK_fragment_dim/8);
     constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_6<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_6<BM_dim, BN_dim, BK_dim, BK_fragment_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
@@ -237,7 +264,7 @@ void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     {
         timer.Start();
         kernel_6
-        <BM_dim, BN_dim, BK_dim,
+        <BM_dim, BN_dim, BK_dim, BK_fragment_dim,
         WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>
         <<<gridDim, blockDim, shmem_bytes>>>(
             device_sgemm_params.A,

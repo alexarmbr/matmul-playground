@@ -117,8 +117,8 @@ kernel_5(half* A,
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
     // tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
     // tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
-    tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K);
-    tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N);
+    tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
+    tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
 
     __syncthreads();
 
