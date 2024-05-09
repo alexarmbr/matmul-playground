@@ -58,20 +58,12 @@ __device__ void tileMemcpySwizzle(TensorSrc src, TensorDst dst, const unsigned i
     auto swizzled_layout = composition(Swizzle<3,0,SWIZZLE_BITS>{}, make_layout(make_shape(ROWS, float4_cols), make_stride(dst_stride_elements / 8, 1)));
     Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(dst.data().get()), swizzled_layout);
     
-    half* addr;
     while (thread_idx < src_float4.size())
     {
       const unsigned int thread_idx_y = thread_idx / float4_cols;
       const unsigned int thread_idx_x = thread_idx % float4_cols;
-      addr = reinterpret_cast<half*>(&dst_float4(thread_idx_y, thread_idx_x));
       dst_float4(thread_idx_y, thread_idx_x) = src_float4(thread_idx_y, thread_idx_x);
       thread_idx += num_threads;
-    }
-    if (thread0())
-    {
-      printf("src size: %d, dst size: %d\n", src_float4.size(), dst_float4.size());
-      printf("dst rows: %d", (int) shape<0>(dst));
-      printf("dst cols: %d", (int) shape<1>(dst));
     }
 }
 
