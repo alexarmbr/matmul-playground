@@ -8,6 +8,9 @@
 
 using namespace cute;
 
+constexpr unsigned int maxThreadsPerBlock = 1024;
+constexpr unsigned int minBlocksPerMultiprocessor = 8;
+
 template <unsigned int BM_dim,
 unsigned int BN_dim,
 unsigned int BK_dim,
@@ -17,6 +20,7 @@ unsigned int WK_dim,
 unsigned int A_swizzle_bits,
 unsigned int B_swizzle_bits>
 __global__ void
+__launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor)
 kernel_5(half* A,
   half* B,
   half* C,
