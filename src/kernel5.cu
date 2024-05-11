@@ -96,15 +96,6 @@ kernel_5(half* A,
 
   // declare register storage to hold fragments of C which we will accumulate into
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
-  if (thread0())
-  {
-    printf("mma tiles per warp m: %d\n", mma_tiles_per_warp_m);
-    printf("mma tiles per warp n: %d\n", mma_tiles_per_warp_n);
-    printf("mma tiles per warp k: %d\n", mma_tiles_per_warp_k);
-  }
-
-
-
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
@@ -124,8 +115,8 @@ kernel_5(half* A,
   {
     Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-    tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
-    tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
+    tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
+    tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
 
     __syncthreads();
 

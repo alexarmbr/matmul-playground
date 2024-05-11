@@ -8,6 +8,9 @@
 
 using namespace cute;
 
+constexpr unsigned int maxThreadsPerBlock = 1024;
+constexpr unsigned int minBlocksPerMultiprocessor = 8;
+
 template <unsigned int BM_dim,
 unsigned int BN_dim,
 unsigned int BK_dim,
@@ -17,6 +20,7 @@ unsigned int WK_dim,
 unsigned int A_swizzle_bits,
 unsigned int B_swizzle_bits>
 __global__ void
+__launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor)
 kernel_7(half* A,
   half* B,
   half* C,
@@ -115,9 +119,7 @@ kernel_7(half* A,
   {
     Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-    // tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
-    // tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
-    tileMemcpySwizzleUnrolled<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
+    tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
     tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
 
     __syncthreads();
@@ -125,19 +127,20 @@ kernel_7(half* A,
     // preload tiles of a into registers
     for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
     {
-      half A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-      for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-      {
-        for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
-        {
-          Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
-          ldmatrix_m16n8(A_mma_tile, A_register[mma_m][mma_k]);
-        }
-      }
+      // half A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
+      // for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+      // {
+      //   for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+      //   {
+      //     Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
+      //     ldmatrix_m16n8(A_mma_tile, A_register[mma_m][mma_k]);
+      //   }
+      // }
 
       // load one tile of B at a time, and take outer product between this tile and
       // entire warp tile of A
       half B_register[2];
+      half A_register[4];
       for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
       {
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
@@ -148,9 +151,12 @@ kernel_7(half* A,
           B_register[1] *= alpha;
           for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
           {
+
+            Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_k, warp_m, warp_k));
+            ldmatrix_m16n8(A_mma_tile, A_register);
             mma_sync_m16n8k8(
               C_register[mma_m][mma_n],
-              A_register[mma_m][mma_k],
+              A_register,
               B_register,
               C_register[mma_m][mma_n]
             );
