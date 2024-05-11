@@ -17,7 +17,7 @@ unsigned int WK_dim,
 unsigned int A_swizzle_bits,
 unsigned int B_swizzle_bits>
 __global__ void
-kernel_5(half* A,
+kernel_7(half* A,
   half* B,
   half* C,
   half* D,
@@ -96,15 +96,6 @@ kernel_5(half* A,
 
   // declare register storage to hold fragments of C which we will accumulate into
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
-  if (thread0())
-  {
-    printf("mma tiles per warp m: %d\n", mma_tiles_per_warp_m);
-    printf("mma tiles per warp n: %d\n", mma_tiles_per_warp_n);
-    printf("mma tiles per warp k: %d\n", mma_tiles_per_warp_k);
-  }
-
-
-
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
@@ -180,7 +171,7 @@ kernel_5(half* A,
   }
 }
 
-void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void kernel_7_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
   constexpr unsigned int BM_dim = 128;
@@ -188,8 +179,8 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
   constexpr unsigned int BK_dim = 64;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 4;
-  constexpr unsigned int WARPS_PER_BLOCK_N = 8;
-  constexpr unsigned int WARPS_PER_BLOCK_K = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_K = 2;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
     constexpr unsigned int WN_dim = BN_dim / WARPS_PER_BLOCK_N;
@@ -215,14 +206,14 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_5<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_7<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        kernel_5
+        kernel_7
         <BM_dim, BN_dim, BK_dim,
         WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>
         <<<gridDim, blockDim, shmem_bytes>>>(
