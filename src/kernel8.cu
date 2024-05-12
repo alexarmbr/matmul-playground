@@ -145,6 +145,15 @@ kernel_8(half* A,
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
     tileMemcpySwizzleUnrolled<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
     tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
+    // if (threadIdx.y < 1)
+    // {
+    //   tileMemcpySwizzleUnrolled2<BM_dim, BK_dim, A_swizzle_bits, 0>(A_block_tile, A_smem, K, BK_dim);
+    // }
+    // else
+    // {
+    //   tileMemcpySwizzleUnrolled2<BK_dim, BN_dim, B_swizzle_bits, 1>(B_block_tile, B_smem, N, BN_dim);
+    // }
+
 
     __syncthreads();
 
