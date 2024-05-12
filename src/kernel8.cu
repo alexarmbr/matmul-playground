@@ -43,8 +43,23 @@ kernel_8(half* A,
   constexpr unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
   const unsigned int num_block_tiles_k = K / BK_dim;
   
-  const unsigned int block_m = blockIdx.y;
-  const unsigned int block_n = blockIdx.x;
+  const unsigned int blocks_per_M = M / BM_dim;
+  const unsigned int blocks_per_N = N / BN_dim;
+  auto swizzle_tile_dim = Int<4>{};
+  const int block_swizzle_tiles_per_M = blocks_per_M / swizzle_tile_dim;
+  const int block_swizzle_tiles_per_N = blocks_per_N / swizzle_tile_dim;
+  Layout block_m_map = make_layout(
+    make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
+    make_stride(1 ,0, swizzle_tile_dim, 0)
+  );
+
+  Layout block_n_map = make_layout(
+      make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
+      make_stride(0, 1, 0, swizzle_tile_dim)
+  );
+  
+  const unsigned int block_m = block_m_map(blockIdx.x);
+  const unsigned int block_n = block_n_map(blockIdx.x);
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
 
@@ -197,7 +212,7 @@ void kernel_8_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
   constexpr unsigned int BN_dim = 256;
   constexpr unsigned int BK_dim = 64;
   
-  constexpr unsigned int WARPS_PER_BLOCK_M = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_M = 2;
   constexpr unsigned int WARPS_PER_BLOCK_N = 4;
   constexpr unsigned int WARPS_PER_BLOCK_K = 2;
 

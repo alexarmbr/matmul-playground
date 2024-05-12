@@ -17,7 +17,7 @@ endif()
 file(GLOB SOURCES "src/kernel*.cu")
 
 # add_library(kernels ${SOURCES})
-add_library(kernels src/kernel5.cu src/kernel7.cu)
+add_library(kernels src/kernel5.cu src/kernel8.cu)
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>)
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
 
