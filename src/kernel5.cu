@@ -176,8 +176,8 @@ kernel_5(half* A,
 void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
-  constexpr unsigned int BM_dim = 128;
-  constexpr unsigned int BN_dim = 128;
+  constexpr unsigned int BM_dim = 256;
+  constexpr unsigned int BN_dim = 256;
   constexpr unsigned int BK_dim = 64;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 4;
