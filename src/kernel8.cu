@@ -20,7 +20,6 @@ unsigned int WK_dim,
 unsigned int A_swizzle_bits,
 unsigned int B_swizzle_bits>
 __global__ void
-// __launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor)
 kernel_8(half* A,
   half* B,
   half* C,
@@ -66,8 +65,6 @@ kernel_8(half* A,
   auto A_block_tile_shape = make_shape(Int<BM_dim>{}, Int<BK_dim>{});
   auto B_block_tile_shape = make_shape(Int<BK_dim>{}, Int<BN_dim>{});
   auto CD_block_tile_shape = make_shape(Int<BM_dim>{}, Int<BN_dim>{});
-  // auto A_warp_tile_shape = make_shape(make_shape(Int<WM_dim>{}, Int<WK_dim>{}), make_shape(Int<1>{}, Int<1>{}));
-  // auto B_warp_tile_shape = make_shape(make_shape(Int<WK_dim>{}, Int<WN_dim>{}), make_shape(Int<1>{}, Int<1>{}));
   auto A_warp_tile_shape = make_shape(Int<WM_dim>{}, Int<WK_dim>{});
   auto B_warp_tile_shape = make_shape(Int<WK_dim>{}, Int<WN_dim>{});
   auto CD_warp_tile_shape = make_shape(Int<WM_dim>{}, Int<WN_dim>{});
@@ -75,19 +72,14 @@ kernel_8(half* A,
   auto B_mma_tile_shape = make_shape(Int<MMA_K_dim>{}, Int<MMA_N_dim>{});
   auto CD_mma_tile_shape = make_shape(Int<MMA_M_dim>{}, Int<MMA_N_dim>{});
 
-  
-
   extern __shared__ half shmem[];
   half* A_smem_ = shmem;
   half* B_smem_ = &shmem[BM_dim * BK_dim];
-  // __shared__ half A_smem_[BM_dim * BK_dim];
-  // __shared__ half B_smem_[BK_dim * BN_dim];
 
   Tensor A_gmem = make_tensor(A, make_shape(M, K), LayoutRight{});
   Tensor B_gmem = make_tensor(B, make_shape(K, N), LayoutRight{});
   Tensor C_gmem = make_tensor(C, make_shape(M, N), LayoutRight{});
   Tensor D_gmem = make_tensor(D, make_shape(M, N), LayoutRight{});
-
   
   auto A_smem_layout = composition(Swizzle<3, 3, A_swizzle_bits>{}, make_layout(A_block_tile_shape, LayoutRight{}));
   auto B_smem_layout = composition(Swizzle<3, 3, B_swizzle_bits>{}, make_layout(B_block_tile_shape, LayoutRight{}));
@@ -113,12 +105,6 @@ kernel_8(half* A,
   Tensor D_warp_tiles = coalesce(zipped_divide(D_block_tiles, make_shape(CD_warp_tile_shape)), Step<_1,_1>{});
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
-  // C_mma_tiles += 1;
-
-  // if (thread0())
-  // {
-  //   print(A_mma_tiles.layout());
-  // }
 
   // declare register storage to hold fragments of C which we will accumulate into
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
@@ -145,15 +131,6 @@ kernel_8(half* A,
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
     tileMemcpySwizzleUnrolled<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
     tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
-    // if (threadIdx.y < 1)
-    // {
-    //   tileMemcpySwizzleUnrolled2<BM_dim, BK_dim, A_swizzle_bits, 0>(A_block_tile, A_smem, K, BK_dim);
-    // }
-    // else
-    // {
-    //   tileMemcpySwizzleUnrolled2<BK_dim, BN_dim, B_swizzle_bits, 1>(B_block_tile, B_smem, N, BN_dim);
-    // }
-
 
     __syncthreads();
 
@@ -214,12 +191,12 @@ kernel_8(half* A,
 void kernel_8_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
-  // constexpr unsigned int BM_dim = 256;
-  // constexpr unsigned int BN_dim = 256;
-  // constexpr unsigned int BK_dim = 64;
-  constexpr unsigned int BM_dim = 128;
-  constexpr unsigned int BN_dim = 128;
+  constexpr unsigned int BM_dim = 256;
+  constexpr unsigned int BN_dim = 256;
   constexpr unsigned int BK_dim = 64;
+  // constexpr unsigned int BM_dim = 128;
+  // constexpr unsigned int BN_dim = 128;
+  // constexpr unsigned int BK_dim = 64;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 2;
   constexpr unsigned int WARPS_PER_BLOCK_N = 4;
