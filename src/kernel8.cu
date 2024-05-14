@@ -56,9 +56,20 @@ kernel_8(half* A,
       make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
       make_stride(0, 1, 0, swizzle_tile_dim)
   );
+
+  if (thread0())
+  {
+    printf("block_m_map\n");
+    print(block_m_map);
+    printf("block_n_map\n");
+    print(block_n_map);
+  }
   
   const unsigned int block_m = block_m_map(blockIdx.x);
   const unsigned int block_n = block_n_map(blockIdx.x);
+
+  // const unsigned int block_m = blockIdx.y;
+  // const unsigned int block_n = blockIdx.x;
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
 
@@ -192,14 +203,14 @@ void kernel_8_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
 {
     
   constexpr unsigned int BM_dim = 256;
-  constexpr unsigned int BN_dim = 256;
+  constexpr unsigned int BN_dim = 128;
   constexpr unsigned int BK_dim = 64;
   // constexpr unsigned int BM_dim = 128;
   // constexpr unsigned int BN_dim = 128;
   // constexpr unsigned int BK_dim = 64;
   
-  constexpr unsigned int WARPS_PER_BLOCK_M = 2;
-  constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_M = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_N = 2;
   constexpr unsigned int WARPS_PER_BLOCK_K = 2;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
@@ -223,7 +234,7 @@ void kernel_8_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
     constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
 
-    dim3 gridDim(BlocksN, BlocksM);
+    dim3 gridDim(BlocksN * BlocksM, 1);
     dim3 blockDim(ThreadsN, ThreadsM);
     
     CUDA_CHECK(cudaFuncSetAttribute(kernel_8<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,

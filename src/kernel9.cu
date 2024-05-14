@@ -186,9 +186,6 @@ kernel_9(half* A,
       dst_float4(thread_idx_y + 48, thread_idx_x) = B_gmem_cache_reg[3];
     }
 
-    // tileMemcpySwizzleUnrolled<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
-    // tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
-
     __syncthreads();
 
     for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
@@ -256,7 +253,7 @@ void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
   // constexpr unsigned int BK_dim = 64;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 4;
-  constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_N = 2;
   constexpr unsigned int WARPS_PER_BLOCK_K = 2;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
@@ -280,7 +277,7 @@ void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
     constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
 
-    dim3 gridDim(BlocksN, BlocksM);
+    dim3 gridDim(BlocksN * BlocksM, 1);
     dim3 blockDim(ThreadsN, ThreadsM);
     
     CUDA_CHECK(cudaFuncSetAttribute(kernel_9<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
