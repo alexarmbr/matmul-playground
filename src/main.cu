@@ -57,6 +57,9 @@
         case 9:
             kernel_9_launch(device_sgemm_params, timer, num_iterations);
             break;
+        case 99:
+            cublas_launch(device_sgemm_params, timer, num_iterations);
+            break;
 
     }
     

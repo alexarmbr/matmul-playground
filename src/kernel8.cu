@@ -47,23 +47,15 @@ kernel_8(half* A,
   auto swizzle_tile_dim = Int<4>{};
   const int block_swizzle_tiles_per_M = blocks_per_M / swizzle_tile_dim;
   const int block_swizzle_tiles_per_N = blocks_per_N / swizzle_tile_dim;
-  Layout block_m_map = make_layout(
+  Layout block_n_map = make_layout(
     make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
     make_stride(1 ,0, swizzle_tile_dim, 0)
   );
 
-  Layout block_n_map = make_layout(
+  Layout block_m_map = make_layout(
       make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
       make_stride(0, 1, 0, swizzle_tile_dim)
   );
-
-  if (thread0())
-  {
-    printf("block_m_map\n");
-    print(block_m_map);
-    printf("block_n_map\n");
-    print(block_n_map);
-  }
   
   const unsigned int block_m = block_m_map(blockIdx.x);
   const unsigned int block_n = block_n_map(blockIdx.x);
