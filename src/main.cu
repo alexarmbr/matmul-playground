@@ -8,6 +8,7 @@
     // void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     // void kernel_8_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
+    void kernel_10_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     // void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     // void kernel_2_cute_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
     // void kernel_4_cute_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
@@ -56,6 +57,9 @@
         //     break;
         case 9:
             kernel_9_launch(device_sgemm_params, timer, num_iterations);
+            break;
+        case 10:
+            kernel_10_launch(device_sgemm_params, timer, num_iterations);
             break;
         case 99:
             cublas_launch(device_sgemm_params, timer, num_iterations);

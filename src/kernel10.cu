@@ -145,8 +145,8 @@ kernel_10(half* A,
     
     if (block_k < num_block_tiles_k)
     {
-      Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k+1));
-      Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k+1, block_n));
+      Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
+      Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
       // copy tile of A from global memory to registers
       // we want these memory requests to be in flight while the mmas are being computed
       {
@@ -228,8 +228,8 @@ kernel_10(half* A,
           {
             Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(warp_k, warp_n)));
             ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[warp_k % 2][mma_k][mma_n]);
-            B_mma_tile_reg[0][mma_k][mma_n][0] *= alpha;
-            B_mma_tile_reg[0][mma_k][mma_n][1] *= alpha;
+            B_mma_tile_reg[warp_k % 2][mma_k][mma_n][0] *= alpha;
+            B_mma_tile_reg[warp_k % 2][mma_k][mma_n][1] *= alpha;
           }
         }
       }
