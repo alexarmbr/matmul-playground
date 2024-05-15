@@ -106,6 +106,10 @@ kernel_10(half* A,
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
+  
+  // prologue
+  // 1. load C from global memory into register storage
+  // 2. load k fragment 0 of A and B into smem
   // declare register storage to hold fragments of C which we will accumulate into
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
@@ -127,30 +131,22 @@ kernel_10(half* A,
   Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(0, block_n));
   tileMemcpySwizzleUnrolled<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
   tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
-  
-
-
-
-
-
-
-
-
+  __syncthreads();
+  // end prologue
 
   half A_mma_tile_reg[2][mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
   half B_mma_tile_reg[2][mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
   float4 A_gmem_cache_reg[8];
-  // float4 B_gmem_cache_reg[8];
   float4 B_gmem_cache_reg[4];
   static_assert(BM_dim == 256, "BM_dim must be 256");
-  // static_assert(BN_dim == 256, "BN_dim must be 256");
+  static_assert(BN_dim == 128, "BN_dim must be 128");
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
     
-    if (block_k != num_block_tiles_k)
+    if (block_k < num_block_tiles_k)
     {
-      Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
-      Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
+      Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k+1));
+      Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k+1, block_n));
       // copy tile of A from global memory to registers
       // we want these memory requests to be in flight while the mmas are being computed
       {
@@ -182,29 +178,46 @@ kernel_10(half* A,
         B_gmem_cache_reg[2] = src_float4(thread_idx_y + 32, thread_idx_x);
         B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
 
-        // B_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-        // B_gmem_cache_reg[1] = src_float4(thread_idx_y + 8, thread_idx_x);
-        // B_gmem_cache_reg[2] = src_float4(thread_idx_y + 16, thread_idx_x);
-        // B_gmem_cache_reg[3] = src_float4(thread_idx_y + 24, thread_idx_x);
-        // B_gmem_cache_reg[4] = src_float4(thread_idx_y + 32, thread_idx_x);
-        // B_gmem_cache_reg[5] = src_float4(thread_idx_y + 40, thread_idx_x);
-        // B_gmem_cache_reg[6] = src_float4(thread_idx_y + 48, thread_idx_x);
-        // B_gmem_cache_reg[7] = src_float4(thread_idx_y + 56, thread_idx_x);
-
       }
     }
 
-    // __syncthreads();
 
-    for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
+    // preload tiles of a into registers
+    for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
     {
+      for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+      {
+        Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(warp_m, 0)));
+        ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[0][mma_m][mma_k]);
+      }
+    }
+
+    // preload tiles of b into registers
+    #pragma unroll
+    for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+    {
+      #pragma unroll
+      for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+      {
+        Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(0, warp_n)));
+        ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[0][mma_k][mma_n]);
+        B_mma_tile_reg[0][mma_k][mma_n][0] *= alpha;
+        B_mma_tile_reg[0][mma_k][mma_n][1] *= alpha;
+      }
+    }
+
+
+    for (unsigned int warp_k = 1; warp_k <= warp_tiles_per_block_k; warp_k++)
+    {
+      if (warp_k < warp_tiles_per_block_k)
+      {
         // preload tiles of a into registers
         for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
         {
           for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
           {
             Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(warp_m, warp_k)));
-            ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[0][mma_m][mma_k]);
+            ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[warp_k % 2][mma_m][mma_k]);
           }
         }
 
@@ -214,11 +227,12 @@ kernel_10(half* A,
           for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
           {
             Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(warp_k, warp_n)));
-            ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[0][mma_k][mma_n]);
+            ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[warp_k % 2][mma_k][mma_n]);
             B_mma_tile_reg[0][mma_k][mma_n][0] *= alpha;
             B_mma_tile_reg[0][mma_k][mma_n][1] *= alpha;
           }
         }
+      }
 
       // outer product between tiles of a and b
       for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
@@ -229,8 +243,8 @@ kernel_10(half* A,
           {
             mma_sync_m16n8k8(
               C_register[mma_m][mma_n],
-              A_mma_tile_reg[0][mma_m][mma_k],
-              B_mma_tile_reg[0][mma_k][mma_n],
+              A_mma_tile_reg[(warp_k-1) % 2][mma_m][mma_k],
+              B_mma_tile_reg[(warp_k-1) % 2][mma_k][mma_n],
               C_register[mma_m][mma_n]
             );
           }
