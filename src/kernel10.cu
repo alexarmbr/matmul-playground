@@ -20,7 +20,7 @@ unsigned int WK_dim,
 unsigned int A_swizzle_bits,
 unsigned int B_swizzle_bits>
 __global__ void
-kernel_9(half* A,
+kernel_10(half* A,
   half* B,
   half* C,
   half* D,
@@ -129,8 +129,16 @@ kernel_9(half* A,
   tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
   
 
-  half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-  half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
+
+
+
+
+
+
+
+
+  half A_mma_tile_reg[2][mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
+  half B_mma_tile_reg[2][mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
   float4 A_gmem_cache_reg[8];
   // float4 B_gmem_cache_reg[8];
   float4 B_gmem_cache_reg[4];
@@ -196,7 +204,7 @@ kernel_9(half* A,
           for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
           {
             Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(warp_m, warp_k)));
-            ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[mma_m][mma_k]);
+            ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[0][mma_m][mma_k]);
           }
         }
 
@@ -206,9 +214,9 @@ kernel_9(half* A,
           for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
           {
             Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(warp_k, warp_n)));
-            ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[mma_k][mma_n]);
-            B_mma_tile_reg[mma_k][mma_n][0] *= alpha;
-            B_mma_tile_reg[mma_k][mma_n][1] *= alpha;
+            ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[0][mma_k][mma_n]);
+            B_mma_tile_reg[0][mma_k][mma_n][0] *= alpha;
+            B_mma_tile_reg[0][mma_k][mma_n][1] *= alpha;
           }
         }
 
@@ -221,8 +229,8 @@ kernel_9(half* A,
           {
             mma_sync_m16n8k8(
               C_register[mma_m][mma_n],
-              A_mma_tile_reg[mma_m][mma_k],
-              B_mma_tile_reg[mma_k][mma_n],
+              A_mma_tile_reg[0][mma_m][mma_k],
+              B_mma_tile_reg[0][mma_k][mma_n],
               C_register[mma_m][mma_n]
             );
           }
@@ -281,7 +289,7 @@ kernel_9(half* A,
   }
 }
 
-void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void kernel_10_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
   constexpr unsigned int BM_dim = 256;
@@ -319,14 +327,14 @@ void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     dim3 gridDim(BlocksN * BlocksM, 1);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_9<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_10<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        kernel_9
+        kernel_10
         <BM_dim, BN_dim, BK_dim,
         WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>
         <<<gridDim, blockDim, shmem_bytes>>>(
