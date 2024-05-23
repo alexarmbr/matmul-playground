@@ -94,6 +94,10 @@ kernel_5(half* A,
   // create warp tiles for a,b inside of shared memory block tiles
   Tensor A_warp_tiles = coalesce(zipped_divide(A_smem, A_warp_tile_shape), Step<_1,Step<>>{});
   Tensor B_warp_tiles = coalesce(zipped_divide(B_smem, B_warp_tile_shape), Step<_1,Step<>>{});
+  // if (thread0())
+  // {
+  //   print(A_warp_tiles.layout());
+  // }
 
   // create mma tiles for a,b inside of warp_tiles
   // Tensor A_mma_tiles = coalesce(zipped_divide(A_warp_tiles, make_shape(A_mma_tile_shape)), Step<_1,Step<>>{});
@@ -176,7 +180,8 @@ kernel_5(half* A,
     for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
     {
         // preload tiles of a into registers
-        // Tensor A_warp_tile = A_warp_tiles(make_coord(_,_), make_coord(make_coord(warp_m, warp_k), make_coord(block_m, block_k)));
+        half* A_warp_tile = A_warp_tiles(make_coord(_,_), make_coord(warp_m, warp_k)).data().get();
+        half* B_warp_tile = B_warp_tiles(make_coord(_,_), make_coord(warp_k, warp_n)).data().get();
         for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
         {
           for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
