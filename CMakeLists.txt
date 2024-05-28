@@ -21,7 +21,7 @@ add_library(kernels ${SOURCES})
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>)
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
 
-# target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
+target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 target_include_directories(kernels PRIVATE /tmp/cutlass/include)
