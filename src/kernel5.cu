@@ -93,7 +93,8 @@ kernel_5(half* A,
   
   // create warp tiles for a,b inside of shared memory block tiles
   Tensor A_warp_tiles = coalesce(zipped_divide(A_smem, A_warp_tile_shape), Step<_1,Step<>>{});
-  Tensor B_warp_tiles = coalesce(zipped_divide(B_smem, B_warp_tile_shape), Step<_1,Step<>>{});
+  // Tensor B_warp_tiles = coalesce(zipped_divide(B_smem, B_warp_tile_shape), Step<_1,Step<>>{});
+  Tensor B_warp_tiles = zipped_divide(B_smem, B_warp_tile_shape);
   // if (thread0())
   // {
   //   print(A_warp_tiles.layout());
@@ -101,7 +102,7 @@ kernel_5(half* A,
 
   // create mma tiles for a,b inside of warp_tiles
   // Tensor A_mma_tiles = coalesce(zipped_divide(A_warp_tiles, make_shape(A_mma_tile_shape)), Step<_1,Step<>>{});
-  // Tensor B_mma_tiles = coalesce(zipped_divide(B_warp_tiles, make_shape(B_mma_tile_shape)), Step<_1,Step<>>{});
+  Tensor B_mma_tiles = coalesce(zipped_divide(B_warp_tiles, make_shape(B_mma_tile_shape)), Step<_1,Step<>>{});
 
   // create warp and mma tiles for c,d inside of global memory block tiles
   Tensor C_warp_tiles = coalesce(zipped_divide(C_block_tiles, make_shape(CD_warp_tile_shape)), Step<_1,_1>{});
@@ -181,13 +182,22 @@ kernel_5(half* A,
     {
         // preload tiles of a into registers
         half* A_warp_tile = A_warp_tiles(make_coord(_,_), make_coord(warp_m, warp_k)).data().get();
-        half* B_warp_tile = B_warp_tiles(make_coord(_,_), make_coord(warp_k, warp_n)).data().get();
+        // half* B_warp_tile = B_warp_tiles(make_coord(_,_), make_coord(warp_k, warp_n)).data().get();
         for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
         {
           for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
           {
+            unsigned int logical_offset = (((mma_m * MMA_M_dim) + (threadIdx.x % 16)) * BK_dim) + mma_k * MMA_K_dim;
+            unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b111000) >> 3);
+            uint32_t (&reg_) [2] = reinterpret_cast<uint32_t(&)[2]>(A_mma_tile_reg[mma_m][mma_k]);
             // Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(warp_m, warp_k)));
             // ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[mma_m][mma_k]);
+            asm volatile (
+              "ldmatrix.sync.aligned.m8n8.x2.shared.b16 "
+              "{%0, %1}, [%2];"
+              : "=r"(reg_[0]), "=r"(reg_[1])
+              : "r"(cvta_to_shared_u32(A_warp_tile + swizzled_offset))
+          );
           }
         }
 
@@ -196,10 +206,10 @@ kernel_5(half* A,
         {
           for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
           {
-            // Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(warp_k, warp_n)));
-            // ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[mma_k][mma_n]);
-            // B_mma_tile_reg[mma_k][mma_n][0] *= alpha;
-            // B_mma_tile_reg[mma_k][mma_n][1] *= alpha;
+            Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(warp_k, warp_n)));
+            ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[mma_k][mma_n]);
+            B_mma_tile_reg[mma_k][mma_n][0] *= alpha;
+            B_mma_tile_reg[mma_k][mma_n][1] *= alpha;
           }
         }
 
@@ -210,12 +220,12 @@ kernel_5(half* A,
         {
           for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
           {
-            // mma_sync_m16n8k8(
-            //   C_register[mma_m][mma_n],
-            //   A_mma_tile_reg[mma_m][mma_k],
-            //   B_mma_tile_reg[mma_k][mma_n],
-            //   C_register[mma_m][mma_n]
-            // );
+            mma_sync_m16n8k8(
+              C_register[mma_m][mma_n],
+              A_mma_tile_reg[mma_m][mma_k],
+              B_mma_tile_reg[mma_k][mma_n],
+              C_register[mma_m][mma_n]
+            );
           }
         }
       }
