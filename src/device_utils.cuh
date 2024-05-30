@@ -213,11 +213,10 @@ __device__ __forceinline__ void ldmatrix_a(
     uint32_t (&reg_) [4][8][2] = reinterpret_cast<uint32_t(&)[4][8][2]>(reg);
     unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
     unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b111000000) >> 3);
-    // if (blockIdx.x == 0 && threadIdx.x == 4 && threadIdx.y == 0) {
-    // printf("starting value: %f \n", (float) src[swizzled_offset]);
-    // }
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
+
+    constexpr int x_thread = 0;
     
     // 0
     asm volatile (
@@ -226,12 +225,11 @@ __device__ __forceinline__ void ldmatrix_a(
         : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == 1 && threadIdx.y == 0) {
+    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
         printf("src_addr: %u\n", src_addr);
         printf("%f\n", (float) reg[0][0][0]);
     }
-    src_addr ^= 0b10000000;
-
+    src_addr ^= 0b10000;
     
     // 1
     asm volatile (
@@ -240,9 +238,92 @@ __device__ __forceinline__ void ldmatrix_a(
         : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == 1 && threadIdx.y == 0) {
+    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
         printf("src_addr: %u\n", src_addr);
         printf("%f\n", (float) reg[0][1][0]);
+    }
+
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][2][0]), "=r"(reg_[0][2][1]), "=r"(reg_[1][2][0]), "=r"(reg_[1][2][1])
+        : "r"(src_addr)
+    );
+    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+        printf("src_addr: %u\n", src_addr);
+        printf("%f\n", (float) reg[0][2][0]);
+    }
+
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][3][0]), "=r"(reg_[0][3][1]), "=r"(reg_[1][3][0]), "=r"(reg_[1][3][1])
+        : "r"(src_addr)
+    );
+    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+        printf("src_addr: %u\n", src_addr);
+        printf("%f\n", (float) reg[0][3][0]);
+    }
+
+    src_addr ^= 0b1110000;
+
+    // 4
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][4][0]), "=r"(reg_[0][4][1]), "=r"(reg_[1][4][0]), "=r"(reg_[1][4][1])
+        : "r"(src_addr)
+    );
+    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+        printf("src_addr: %u\n", src_addr);
+        printf("%f\n", (float) reg[0][3][0]);
+    }
+
+    src_addr ^= 0b10000;
+
+    // 5
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][5][0]), "=r"(reg_[0][5][1]), "=r"(reg_[1][5][0]), "=r"(reg_[1][5][1])
+        : "r"(src_addr)
+    );
+    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+        printf("src_addr: %u\n", src_addr);
+        printf("%f\n", (float) reg[0][0][0]);
+    }
+    src_addr ^= 0b110000;
+    
+    // 6
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][6][0]), "=r"(reg_[0][6][1]), "=r"(reg_[1][6][0]), "=r"(reg_[1][6][1])
+        : "r"(src_addr)
+    );
+    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+        printf("src_addr: %u\n", src_addr);
+        printf("%f\n", (float) reg[0][1][0]);
+    }
+
+    src_addr ^= 0b10000;
+
+    // 7
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][7][0]), "=r"(reg_[0][7][1]), "=r"(reg_[1][7][0]), "=r"(reg_[1][7][1])
+        : "r"(src_addr)
+    );
+    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+        printf("src_addr: %u\n", src_addr);
+        printf("%f\n", (float) reg[0][2][0]);
     }
 
 }
