@@ -211,9 +211,13 @@ __device__ __forceinline__ void ldmatrix_a(
 )
 {
     uint32_t (&reg_) [4][8][2] = reinterpret_cast<uint32_t(&)[4][8][2]>(reg);
-    unsigned int logical_offset = threadIdx.x * smem_stride;
-    unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b1110000000) >> 4);
+    unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
+    unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b111000000) >> 3);
+    // if (blockIdx.x == 0 && threadIdx.x == 4 && threadIdx.y == 0) {
+    // printf("starting value: %f \n", (float) src[swizzled_offset]);
+    // }
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
+    // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
     
     // 0
     asm volatile (
@@ -222,7 +226,12 @@ __device__ __forceinline__ void ldmatrix_a(
         : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
         : "r"(src_addr)
     );
-    src_addr ^= 0b0001000;
+    if (blockIdx.x == 0 && threadIdx.x == 1 && threadIdx.y == 0) {
+        printf("src_addr: %u\n", src_addr);
+        printf("%f\n", (float) reg[0][0][0]);
+    }
+    src_addr ^= 0b10000000;
+
     
     // 1
     asm volatile (
@@ -231,6 +240,11 @@ __device__ __forceinline__ void ldmatrix_a(
         : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
         : "r"(src_addr)
     );
+    if (blockIdx.x == 0 && threadIdx.x == 1 && threadIdx.y == 0) {
+        printf("src_addr: %u\n", src_addr);
+        printf("%f\n", (float) reg[0][1][0]);
+    }
+
 }
 
 
