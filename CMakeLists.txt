@@ -33,3 +33,4 @@ add_executable(runner src/main.cu)
 target_link_libraries(runner PUBLIC kernels cublas_launch)
 
 
+# add_executable(index tmp/index.cu)

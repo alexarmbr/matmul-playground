@@ -203,3 +203,35 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
     reg_[1] = src_ptr[fragment_row * src_stride_bytes + fragment_col];
 }
 
+
+__device__ __forceinline__ void ldmatrix_a(
+    half* src,
+    half (&reg)[4][8][4],
+    const unsigned int smem_stride
+)
+{
+    uint32_t (&reg_) [4][8][2] = reinterpret_cast<uint32_t(&)[4][8][2]>(reg);
+    unsigned int logical_offset = threadIdx.x * smem_stride;
+    unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b1110000000) >> 4);
+    uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
+    
+    // 0
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b0001000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
+        : "r"(src_addr)
+    );
+}
+
+
+
