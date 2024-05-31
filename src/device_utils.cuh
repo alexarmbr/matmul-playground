@@ -454,7 +454,7 @@ __device__ __forceinline__ void ldmatrix_b(
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
 
-    constexpr int x_thread = 0;
+    constexpr int x_thread = 32;
     asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
@@ -462,10 +462,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "r"(src_addr)
     );
 
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[0][0][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][0][0]);
+    // }
     src_addr ^= 0b10000;
     
     // 1
@@ -475,10 +475,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[0][1]), "=r"(reg_[1][1]), "=r"(reg_[2][1]), "=r"(reg_[3][1])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[0][1][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][1][0]);
+    // }
 
     src_addr ^= 0b110000;
 
@@ -489,10 +489,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[0][2]), "=r"(reg_[1][2]), "=r"(reg_[2][2]), "=r"(reg_[3][2])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[0][2][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][2][0]);
+    // }
 
     src_addr ^= 0b10000;
 
@@ -503,10 +503,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[0][3]), "=r"(reg_[1][3]), "=r"(reg_[2][3]), "=r"(reg_[3][3])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[0][3][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][3][0]);
+    // }
 
     src_addr ^= 0b1110000;
 
@@ -517,10 +517,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[0][4]), "=r"(reg_[1][4]), "=r"(reg_[2][4]), "=r"(reg_[3][4])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[0][4][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][4][0]);
+    // }
 
     src_addr ^= 0b10000;
 
@@ -531,10 +531,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[0][5]), "=r"(reg_[1][5]), "=r"(reg_[2][5]), "=r"(reg_[3][5])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[0][5][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][5][0]);
+    // }
     src_addr ^= 0b110000;
     
     // 6
@@ -544,10 +544,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[0][6]), "=r"(reg_[1][6]), "=r"(reg_[2][6]), "=r"(reg_[3][6])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[0][6][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][6][0]);
+    // }
 
     src_addr ^= 0b10000;
 
@@ -558,10 +558,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[0][7]), "=r"(reg_[1][7]), "=r"(reg_[2][7]), "=r"(reg_[3][7])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[0][7][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][7][0]);
+    // }
 
     src_addr ^= 0b10000001110000;
 
@@ -572,10 +572,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[4][0]), "=r"(reg_[5][0]), "=r"(reg_[6][0]), "=r"(reg_[7][0])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[4][0][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][0][0]);
+    // }
     src_addr ^= 0b10000;
     
     // 1
@@ -585,10 +585,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[4][1]), "=r"(reg_[5][1]), "=r"(reg_[6][1]), "=r"(reg_[7][1])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[4][1][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][1][0]);
+    // }
 
     src_addr ^= 0b110000;
 
@@ -599,10 +599,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[4][2]), "=r"(reg_[5][2]), "=r"(reg_[6][2]), "=r"(reg_[7][2])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[4][2][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][2][0]);
+    // }
 
     src_addr ^= 0b10000;
 
@@ -613,10 +613,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[4][3]), "=r"(reg_[5][3]), "=r"(reg_[6][3]), "=r"(reg_[7][3])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[4][3][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][3][0]);
+    // }
 
     src_addr ^= 0b1110000;
 
@@ -627,10 +627,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[4][4]), "=r"(reg_[5][4]), "=r"(reg_[6][4]), "=r"(reg_[7][4])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[4][4][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][4][0]);
+    // }
 
     src_addr ^= 0b10000;
 
@@ -641,10 +641,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[4][5]), "=r"(reg_[5][5]), "=r"(reg_[6][5]), "=r"(reg_[7][5])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[4][5][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][5][0]);
+    // }
     src_addr ^= 0b110000;
     
     // 6
@@ -654,10 +654,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[4][6]), "=r"(reg_[5][6]), "=r"(reg_[6][6]), "=r"(reg_[7][6])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[4][6][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][6][0]);
+    // }
 
     src_addr ^= 0b10000;
 
@@ -668,10 +668,10 @@ __device__ __forceinline__ void ldmatrix_b(
         : "=r"(reg_[4][7]), "=r"(reg_[5][7]), "=r"(reg_[6][7]), "=r"(reg_[7][7])
         : "r"(src_addr)
     );
-    if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
-        printf("src_addr: %u\n", src_addr);
-        printf("%f\n", (float) reg[4][7][0]);
-    }
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][7][0]);
+    // }
 
     #pragma unroll
     for (int k = 0; k < 8; k++)
