@@ -205,73 +205,39 @@ kernel_6(half* A,
       }
     }
 
-    // preload tiles of a into registers
-    // half* A_warp_tile = A_warp_tiles(make_coord(_,_), make_coord(warp_m, warp_k)).data().get();
-    // half* B_warp_tile = B_warp_tiles(make_coord(_,_), make_coord(warp_k, warp_n)).data().get();
-    // for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-    // {
-    //   for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
-    //   {
-        ldmatrix_a(
-          A_smem_ + (warp_m * WM_dim) * BK_dim,
-          A_mma_tile_reg,
-          BK_dim
-        );
-    
-      //   unsigned int logical_offset = (((warp_m * WM_dim) + (mma_m * MMA_M_dim) + (threadIdx.x % 16)) * BK_dim) + ((warp_k * WK_dim) + (mma_k * MMA_K_dim));
-      //   unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b111000000) >> 3);
-      //   uint32_t (&reg_) [2] = reinterpret_cast<uint32_t(&)[2]>(A_mma_tile_reg[mma_m][mma_k]);
-      //   // Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(warp_m, warp_k)));
-      //   // ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[mma_m][mma_k]);
-      //   asm volatile (
-      //     "ldmatrix.sync.aligned.m8n8.x2.shared.b16 "
-      //     "{%0, %1}, [%2];"
-      //     : "=r"(reg_[0]), "=r"(reg_[1])
-      //     : "r"(cvta_to_shared_u32(A_smem_ + swizzled_offset))
-      //     // : "r"(cvta_to_shared_u32(A_smem_ + logical_offset))
-      // );
-    //   }
-    // }
+    ldmatrix_a(
+      A_smem_ + (warp_m * WM_dim) * BK_dim,
+      A_mma_tile_reg,
+      BK_dim
+    );
+    ldmatrix_b(
+      B_smem_ + (warp_n * WN_dim),
+      B_mma_tile_reg,
+      BN_dim,
+      alpha
+    );
 
-    // preload tiles of b into registers
-    for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+    // outer product between tiles of a and b
+    #pragma unroll
+    for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
     {
-      for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+      #pragma unroll
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        unsigned int logical_offset = (((mma_k * MMA_K_dim) + (threadIdx.x % 8)) * BN_dim) + ((warp_n * WN_dim) + (mma_n * MMA_N_dim));
-        unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b1110000000) >> 4);
-        uint32_t &reg_ = reinterpret_cast<uint32_t&>(B_mma_tile_reg[mma_k][mma_n]);
-
-        asm volatile (
-          "ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 "
-          "{%0}, [%1];"
-          : "=r"(reg_)
-          // : "r"(cvta_to_shared_u32(B_smem_ + swizzled_offset))
-          : "r"(cvta_to_shared_u32(B_smem_ + swizzled_offset))
-
-      );
-        B_mma_tile_reg[mma_k][mma_n][0] *= alpha;
-        B_mma_tile_reg[mma_k][mma_n][1] *= alpha;
+        #pragma unroll
+        for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+        {
+          mma_sync_m16n8k8(
+            C_register[mma_m][mma_n],
+            A_mma_tile_reg[mma_m][mma_k],
+            B_mma_tile_reg[mma_k][mma_n],
+            C_register[mma_m][mma_n]
+          );
+        }
       }
     }
 
-  // outer product between tiles of a and b
-  for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
-  {
-    for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-    {
-      for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-      {
-        mma_sync_m16n8k8(
-          C_register[mma_m][mma_n],
-          A_mma_tile_reg[mma_m][mma_k],
-          B_mma_tile_reg[mma_k][mma_n],
-          C_register[mma_m][mma_n]
-        );
-      }
-    }
-  }
-__syncthreads();
+    __syncthreads();
 
     {
       constexpr unsigned int float4_cols = BK_dim / 8; // 8
