@@ -15,7 +15,7 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 # file(GLOB SOURCES "src/kernel*.cu")
-file(GLOB SOURCES "src/kernel6.cu")
+file(GLOB SOURCES "src/kernel7.cu")
 
 add_library(kernels ${SOURCES})
 # add_library(kernels src/kernel9.cu src/kernel10.cu)

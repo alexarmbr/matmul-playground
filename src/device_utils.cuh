@@ -685,3 +685,527 @@ __device__ __forceinline__ void ldmatrix_b(
     }
 
 }
+
+
+__device__ __forceinline__ void ldmatrix_a_phase1(
+    half* src,
+    half (&reg)[4][8][4],
+    const unsigned int smem_stride
+)
+{
+    uint32_t (&reg_) [4][8][2] = reinterpret_cast<uint32_t(&)[4][8][2]>(reg);
+    unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
+    unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b111000000) >> 3);
+    uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
+    // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
+
+    constexpr int x_thread = 0;
+    
+    // 0
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][0][0]);
+    // }
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][1][0]);
+    // }
+
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][2][0]), "=r"(reg_[0][2][1]), "=r"(reg_[1][2][0]), "=r"(reg_[1][2][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][2][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][3][0]), "=r"(reg_[0][3][1]), "=r"(reg_[1][3][0]), "=r"(reg_[1][3][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][3][0]);
+    // }
+
+    src_addr ^= 0b1000000110000;
+
+    // 0
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][0][0]), "=r"(reg_[2][0][1]), "=r"(reg_[3][0][0]), "=r"(reg_[3][0][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[2][0][0]);
+    // }
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][1][0]), "=r"(reg_[2][1][1]), "=r"(reg_[3][1][0]), "=r"(reg_[3][1][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[2][1][0]);
+    // }
+
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][2][0]), "=r"(reg_[2][2][1]), "=r"(reg_[3][2][0]), "=r"(reg_[3][2][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[2][2][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][3][0]), "=r"(reg_[2][3][1]), "=r"(reg_[3][3][0]), "=r"(reg_[3][3][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[2][3][0]);
+    // }
+}
+
+
+__device__ __forceinline__ void ldmatrix_a_phase2(
+    half* src,
+    half (&reg)[4][8][4],
+    const unsigned int smem_stride
+)
+{
+    uint32_t (&reg_) [4][8][2] = reinterpret_cast<uint32_t(&)[4][8][2]>(reg);
+    unsigned int logical_offset = (threadIdx.x % 32) * smem_stride + 32;
+    unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b111000000) >> 3);
+    uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
+    // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
+
+    constexpr int x_thread = 0;
+
+    // 4
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][4][0]), "=r"(reg_[0][4][1]), "=r"(reg_[1][4][0]), "=r"(reg_[1][4][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][4][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 5
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][5][0]), "=r"(reg_[0][5][1]), "=r"(reg_[1][5][0]), "=r"(reg_[1][5][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][5][0]);
+    // }
+    src_addr ^= 0b110000;
+    
+    // 6
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][6][0]), "=r"(reg_[0][6][1]), "=r"(reg_[1][6][0]), "=r"(reg_[1][6][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][6][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 7
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][7][0]), "=r"(reg_[0][7][1]), "=r"(reg_[1][7][0]), "=r"(reg_[1][7][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][7][0]);
+    // }
+
+    src_addr ^= 0b1000000110000;
+
+    // 4
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][4][0]), "=r"(reg_[2][4][1]), "=r"(reg_[3][4][0]), "=r"(reg_[3][4][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[2][4][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 5
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][5][0]), "=r"(reg_[2][5][1]), "=r"(reg_[3][5][0]), "=r"(reg_[3][5][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[2][5][0]);
+    // }
+    src_addr ^= 0b110000;
+    
+    // 6
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][6][0]), "=r"(reg_[2][6][1]), "=r"(reg_[3][6][0]), "=r"(reg_[3][6][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[2][6][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 7
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][7][0]), "=r"(reg_[2][7][1]), "=r"(reg_[3][7][0]), "=r"(reg_[3][7][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[2][7][0]);
+    // }
+
+}
+
+
+
+
+__device__ __forceinline__ void ldmatrix_b_phase1(
+    half* src,
+    half (&reg)[8][8][2],
+    const unsigned int smem_stride,
+    half alpha
+
+)
+{
+    uint32_t (&reg_) [8][8] = reinterpret_cast<uint32_t(&)[8][8]>(reg);
+    unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
+    unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b1111000000) >> 4);
+    uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
+    // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
+
+    constexpr int x_thread = 0;
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][0]), "=r"(reg_[1][0]), "=r"(reg_[2][0]), "=r"(reg_[3][0])
+        : "r"(src_addr)
+    );
+
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][0][0]);
+    // }
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][1]), "=r"(reg_[1][1]), "=r"(reg_[2][1]), "=r"(reg_[3][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][1][0]);
+    // }
+
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][2]), "=r"(reg_[1][2]), "=r"(reg_[2][2]), "=r"(reg_[3][2])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][2][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][3]), "=r"(reg_[1][3]), "=r"(reg_[2][3]), "=r"(reg_[3][3])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][3][0]);
+    // }
+
+    src_addr ^= 0b1110000;
+
+    // 4
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][4]), "=r"(reg_[1][4]), "=r"(reg_[2][4]), "=r"(reg_[3][4])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][4][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 5
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][5]), "=r"(reg_[1][5]), "=r"(reg_[2][5]), "=r"(reg_[3][5])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][5][0]);
+    // }
+    src_addr ^= 0b110000;
+    
+    // 6
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][6]), "=r"(reg_[1][6]), "=r"(reg_[2][6]), "=r"(reg_[3][6])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[0][6][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 7
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][7]), "=r"(reg_[1][7]), "=r"(reg_[2][7]), "=r"(reg_[3][7])
+        : "r"(src_addr)
+    );
+
+
+    #pragma unroll
+    for (int k = 0; k < 4; k++)
+    {
+        #pragma unroll
+        for (int n = 0; n < 8; n++)
+        {
+            reg[k][n][0] *= alpha;
+            reg[k][n][1] *= alpha;
+        }
+    }
+
+}
+
+
+
+__device__ __forceinline__ void ldmatrix_b_phase2(
+    half* src,
+    half (&reg)[8][8][2],
+    const unsigned int smem_stride,
+    half alpha
+
+)
+{
+    uint32_t (&reg_) [8][8] = reinterpret_cast<uint32_t(&)[8][8]>(reg);
+    unsigned int logical_offset = ((threadIdx.x % 32) + 32) * smem_stride;
+    unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b1111000000) >> 4);
+    uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
+    // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
+
+    constexpr int x_thread = 0;
+
+    // 0
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[4][0]), "=r"(reg_[5][0]), "=r"(reg_[6][0]), "=r"(reg_[7][0])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][0][0]);
+    // }
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[4][1]), "=r"(reg_[5][1]), "=r"(reg_[6][1]), "=r"(reg_[7][1])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][1][0]);
+    // }
+
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[4][2]), "=r"(reg_[5][2]), "=r"(reg_[6][2]), "=r"(reg_[7][2])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][2][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[4][3]), "=r"(reg_[5][3]), "=r"(reg_[6][3]), "=r"(reg_[7][3])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][3][0]);
+    // }
+
+    src_addr ^= 0b1110000;
+
+    // 4
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[4][4]), "=r"(reg_[5][4]), "=r"(reg_[6][4]), "=r"(reg_[7][4])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][4][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 5
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[4][5]), "=r"(reg_[5][5]), "=r"(reg_[6][5]), "=r"(reg_[7][5])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][5][0]);
+    // }
+    src_addr ^= 0b110000;
+    
+    // 6
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[4][6]), "=r"(reg_[5][6]), "=r"(reg_[6][6]), "=r"(reg_[7][6])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][6][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 7
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[4][7]), "=r"(reg_[5][7]), "=r"(reg_[6][7]), "=r"(reg_[7][7])
+        : "r"(src_addr)
+    );
+    // if (blockIdx.x == 0 && threadIdx.x == x_thread && threadIdx.y == 0) {
+    //     printf("src_addr: %u\n", src_addr);
+    //     printf("%f\n", (float) reg[4][7][0]);
+    // }
+
+    #pragma unroll
+    for (int k = 4; k < 8; k++)
+    {
+        #pragma unroll
+        for (int n = 0; n < 8; n++)
+        {
+            reg[k][n][0] *= alpha;
+            reg[k][n][1] *= alpha;
+        }
+    }
+
+}
