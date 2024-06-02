@@ -64,25 +64,25 @@ kernel_6(half* A,
   constexpr unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
   const unsigned int num_block_tiles_k = K / BK_dim;
   
-  const unsigned int blocks_per_M = M / BM_dim;
+  // const unsigned int blocks_per_M = M / BM_dim;
   const unsigned int blocks_per_N = N / BN_dim;
-  auto swizzle_tile_dim = Int<4>{};
-  const int block_swizzle_tiles_per_M = blocks_per_M / swizzle_tile_dim;
-  const int block_swizzle_tiles_per_N = blocks_per_N / swizzle_tile_dim;
-  Layout block_n_map = make_layout(
-    make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
-    make_stride(1 ,0, swizzle_tile_dim, 0)
-  );
+  // auto swizzle_tile_dim = Int<4>{};
+  // const int block_swizzle_tiles_per_M = blocks_per_M / swizzle_tile_dim;
+  // const int block_swizzle_tiles_per_N = blocks_per_N / swizzle_tile_dim;
+  // Layout block_n_map = make_layout(
+  //   make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
+  //   make_stride(1 ,0, swizzle_tile_dim, 0)
+  // );
 
-  Layout block_m_map = make_layout(
-      make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
-      make_stride(0, 1, 0, swizzle_tile_dim)
-  );
+  // Layout block_m_map = make_layout(
+  //     make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
+  //     make_stride(0, 1, 0, swizzle_tile_dim)
+  // );
   
-  const unsigned int block_m = block_m_map(blockIdx.x);
-  const unsigned int block_n = block_n_map(blockIdx.x);
-  // const unsigned int block_m = blockIdx.x / blocks_per_N;
-  // const unsigned int block_n = blockIdx.x % blocks_per_N;
+  // const unsigned int block_m = block_m_map(blockIdx.x);
+  // const unsigned int block_n = block_n_map(blockIdx.x);
+  const unsigned int block_m = blockIdx.x / blocks_per_N;
+  const unsigned int block_n = blockIdx.x % blocks_per_N;
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
 
@@ -137,20 +137,16 @@ kernel_6(half* A,
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
-  // declare register storage to hold fragments of C which we will accumulate into
-  half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  // declare register storage for accumulators
+  half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
-          
-          // scale C by beta
-          C_register[mma_m][mma_n][0] *= beta;
-          C_register[mma_m][mma_n][1] *= beta;
-          C_register[mma_m][mma_n][2] *= beta;
-          C_register[mma_m][mma_n][3] *= beta;
+        acc_register[mma_m][mma_n][0] = 0;
+        acc_register[mma_m][mma_n][1] = 0;
+        acc_register[mma_m][mma_n][2] = 0;
+        acc_register[mma_m][mma_n][3] = 0;
       }
   }
 
@@ -167,7 +163,7 @@ kernel_6(half* A,
   static_assert(BM_dim == 256, "BM_dim must be 256");
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
-    
+
     if (block_k != num_block_tiles_k)
     {
       Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
@@ -204,7 +200,6 @@ kernel_6(half* A,
         B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
       }
     }
-
     ldmatrix_a(
       A_smem_ + (warp_m * WM_dim) * BK_dim,
       A_mma_tile_reg,
@@ -217,6 +212,7 @@ kernel_6(half* A,
       alpha
     );
 
+
     // outer product between tiles of a and b
     #pragma unroll
     for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
@@ -228,10 +224,10 @@ kernel_6(half* A,
         for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
         {
           mma_sync_m16n8k8(
-            C_register[mma_m][mma_n],
+            acc_register[mma_m][mma_n],
             A_mma_tile_reg[mma_m][mma_k],
             B_mma_tile_reg[mma_k][mma_n],
-            C_register[mma_m][mma_n]
+            acc_register[mma_m][mma_n]
           );
         }
       }
@@ -272,12 +268,28 @@ kernel_6(half* A,
     }
   }
 
+  half alpha_ = (half)alpha;
+  half beta_ = (half)beta;
+  half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+  {
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      {
+        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
+        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+        acc_register[mma_m][mma_n][0] = acc_register[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
+        acc_register[mma_m][mma_n][1] = acc_register[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
+        acc_register[mma_m][mma_n][2] = acc_register[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
+        acc_register[mma_m][mma_n][3] = acc_register[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
+      }
+  }
+
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
         Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        stmatrix_m16n8(D_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+        stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
       }
   }
 }

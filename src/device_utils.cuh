@@ -673,16 +673,16 @@ __device__ __forceinline__ void ldmatrix_b(
     //     printf("%f\n", (float) reg[4][7][0]);
     // }
 
-    #pragma unroll
-    for (int k = 0; k < 8; k++)
-    {
-        #pragma unroll
-        for (int n = 0; n < 8; n++)
-        {
-            reg[k][n][0] *= alpha;
-            reg[k][n][1] *= alpha;
-        }
-    }
+    // #pragma unroll
+    // for (int k = 0; k < 8; k++)
+    // {
+    //     #pragma unroll
+    //     for (int n = 0; n < 8; n++)
+    //     {
+    //         reg[k][n][0] *= alpha;
+    //         reg[k][n][1] *= alpha;
+    //     }
+    // }
 
 }
 
@@ -1056,19 +1056,6 @@ __device__ __forceinline__ void ldmatrix_b_phase1(
         : "=r"(reg_[0][7]), "=r"(reg_[1][7]), "=r"(reg_[2][7]), "=r"(reg_[3][7])
         : "r"(src_addr)
     );
-
-
-    #pragma unroll
-    for (int k = 0; k < 4; k++)
-    {
-        #pragma unroll
-        for (int n = 0; n < 8; n++)
-        {
-            reg[k][n][0] *= alpha;
-            reg[k][n][1] *= alpha;
-        }
-    }
-
 }
 
 
@@ -1196,16 +1183,4 @@ __device__ __forceinline__ void ldmatrix_b_phase2(
     //     printf("src_addr: %u\n", src_addr);
     //     printf("%f\n", (float) reg[4][7][0]);
     // }
-
-    #pragma unroll
-    for (int k = 4; k < 8; k++)
-    {
-        #pragma unroll
-        for (int n = 0; n < 8; n++)
-        {
-            reg[k][n][0] *= alpha;
-            reg[k][n][1] *= alpha;
-        }
-    }
-
 }

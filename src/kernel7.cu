@@ -137,20 +137,16 @@ kernel_7(half* A,
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
-  // declare register storage to hold fragments of C which we will accumulate into
-  half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  // declare register storage for accumulators
+  half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
-          
-          // scale C by beta
-          C_register[mma_m][mma_n][0] *= beta;
-          C_register[mma_m][mma_n][1] *= beta;
-          C_register[mma_m][mma_n][2] *= beta;
-          C_register[mma_m][mma_n][3] *= beta;
+        acc_register[mma_m][mma_n][0] = 0;
+        acc_register[mma_m][mma_n][1] = 0;
+        acc_register[mma_m][mma_n][2] = 0;
+        acc_register[mma_m][mma_n][3] = 0;
       }
   }
 
@@ -158,16 +154,28 @@ kernel_7(half* A,
   Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(0, block_n));
   tileMemcpySwizzleUnrolled<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
   tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
-  
+  __syncthreads();
+
 
   half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-  // half A_mma_tile_reg_2[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
   half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
   float4 A_gmem_cache_reg[8];
   float4 B_gmem_cache_reg[4];
   static_assert(BM_dim == 256, "BM_dim must be 256");
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
+    ldmatrix_a_phase1(
+      A_smem_ + (warp_m * WM_dim) * BK_dim,
+      A_mma_tile_reg,
+      BK_dim
+    );
+    ldmatrix_b_phase1(
+      B_smem_ + (warp_n * WN_dim),
+      B_mma_tile_reg,
+      BN_dim,
+      alpha
+    );
+
     
     if (block_k != num_block_tiles_k)
     {
@@ -206,50 +214,22 @@ kernel_7(half* A,
       }
     }
 
-    // ldmatrix_a(
+    // ldmatrix_a_phase1(
     //   A_smem_ + (warp_m * WM_dim) * BK_dim,
-    //   A_mma_tile_reg_2,
+    //   A_mma_tile_reg,
     //   BK_dim
     // );
-
-    ldmatrix_a_phase1(
-      A_smem_ + (warp_m * WM_dim) * BK_dim,
-      A_mma_tile_reg,
-      BK_dim
-    );
-    ldmatrix_b_phase1(
-      B_smem_ + (warp_n * WN_dim),
-      B_mma_tile_reg,
-      BN_dim,
-      alpha
-    );
-    
-    // outer product between tiles of a and b
-    #pragma unroll
-    for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k / 2; mma_k++)
-    {
-      #pragma unroll
-      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-      {
-        #pragma unroll
-        for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-        {
-          mma_sync_m16n8k8(
-            C_register[mma_m][mma_n],
-            A_mma_tile_reg[mma_m][mma_k],
-            B_mma_tile_reg[mma_k][mma_n],
-            C_register[mma_m][mma_n]
-          );
-        }
-      }
-    }
-
-
     ldmatrix_a_phase2(
       A_smem_ + (warp_m * WM_dim) * BK_dim,
       A_mma_tile_reg,
       BK_dim
     );
+    // ldmatrix_b_phase1(
+    //   B_smem_ + (warp_n * WN_dim),
+    //   B_mma_tile_reg,
+    //   BN_dim,
+    //   alpha
+    // );
     ldmatrix_b_phase2(
       B_smem_ + (warp_n * WN_dim),
       B_mma_tile_reg,
@@ -257,9 +237,10 @@ kernel_7(half* A,
       alpha
     );
 
+
     // outer product between tiles of a and b
     #pragma unroll
-    for (unsigned int mma_k = mma_tiles_per_warp_k/2; mma_k < mma_tiles_per_warp_k; mma_k++)
+    for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
     {
       #pragma unroll
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
@@ -268,10 +249,10 @@ kernel_7(half* A,
         for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
         {
           mma_sync_m16n8k8(
-            C_register[mma_m][mma_n],
+            acc_register[mma_m][mma_n],
             A_mma_tile_reg[mma_m][mma_k],
             B_mma_tile_reg[mma_k][mma_n],
-            C_register[mma_m][mma_n]
+            acc_register[mma_m][mma_n]
           );
         }
       }
@@ -312,12 +293,28 @@ kernel_7(half* A,
     }
   }
 
+  half alpha_ = (half)alpha;
+  half beta_ = (half)beta;
+  half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+  {
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      {
+        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
+        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+        acc_register[mma_m][mma_n][0] = acc_register[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
+        acc_register[mma_m][mma_n][1] = acc_register[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
+        acc_register[mma_m][mma_n][2] = acc_register[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
+        acc_register[mma_m][mma_n][3] = acc_register[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
+      }
+  }
+
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
         Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        stmatrix_m16n8(D_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+        stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
       }
   }
 }
