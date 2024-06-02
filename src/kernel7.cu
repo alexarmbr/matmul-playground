@@ -236,6 +236,7 @@ kernel_7(half* A,
       BN_dim,
       alpha
     );
+    __syncthreads();
 
 
     // outer product between tiles of a and b
@@ -258,7 +259,6 @@ kernel_7(half* A,
       }
     }
 
-    __syncthreads();
 
     {
       constexpr unsigned int float4_cols = BK_dim / 8; // 8
