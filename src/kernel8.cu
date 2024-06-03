@@ -49,21 +49,21 @@ __device__ __forceinline__ void ldmatrix_a_(
 )
 {
   uint32_t (&reg_) [4][8][2] = reinterpret_cast<uint32_t(&)[4][8][2]>(reg);
-  // const unsigned int logical_offset_1 = (threadIdx.x % 32) * smem_stride;
-  // const unsigned int logical_offset_2 = ((threadIdx.x % 32) + 32) * smem_stride;
-  // const unsigned int swizzled_offset_1 = logical_offset_1 ^ ((logical_offset_1 & 0b111000000) >> 3);
-  // const unsigned int swizzled_offset_2 = logical_offset_2 ^ ((logical_offset_2 & 0b111000000) >> 3);
-  uint32_t src_addr_1 = cvta_to_shared_u32(src);
-  uint32_t src_addr_2 = cvta_to_shared_u32(src + 32 * smem_stride);
-  static constexpr int offsets[8] = {
-    0 * smem_stride,
-    1 * smem_stride,
-    2 * smem_stride,
-    3 * smem_stride,
-    4 * smem_stride,
-    5 * smem_stride,
-    6 * smem_stride,
-    7 * smem_stride
+  const unsigned int logical_offset_1 = (threadIdx.x % 32) * smem_stride;
+  const unsigned int logical_offset_2 = ((threadIdx.x % 32) + 32) * smem_stride;
+  const unsigned int swizzled_offset_1 = logical_offset_1 ^ ((logical_offset_1 & 0b111000000) >> 3);
+  const unsigned int swizzled_offset_2 = logical_offset_2 ^ ((logical_offset_2 & 0b111000000) >> 3);
+  uint32_t src_addr_1 = cvta_to_shared_u32(src + swizzled_offset_1);
+  uint32_t src_addr_2 = cvta_to_shared_u32(src + swizzled_offset_2);
+  static constexpr int increment_xor_patterns[8] = {
+    0b10000,
+    0b110000,
+    0b10000,
+    0b1110000,
+    0b10000,
+    0b110000,
+    0b10000,
+    0b1110000
   };
 
   #pragma unroll 8
@@ -81,6 +81,8 @@ __device__ __forceinline__ void ldmatrix_a_(
           : "=r"(reg_[2][block_col][0]), "=r"(reg_[2][block_col][1]), "=r"(reg_[3][block_col][0]), "=r"(reg_[3][block_col][1])
           : "r"(src_addr_2)
     );
+    src_addr_1 ^= increment_xor_patterns[block_col];
+    src_addr_2 ^= increment_xor_patterns[block_col];
   }
 }
 
