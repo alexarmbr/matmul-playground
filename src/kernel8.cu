@@ -19,7 +19,7 @@ __device__ __forceinline__ void ldmatrix_b_(
   const unsigned int thread_row = threadIdx.x % 8;
   const unsigned int thread_offset = (thread_row * smem_stride) + (thread_group * 8);
   const unsigned int swizzled_offset_1 = thread_offset ^ ((thread_offset & 0b1111000000) >> 4);
-  const unsigned int swizzled_offset_2 = swizzled_offset_1 ^ 0b1110000;
+  const unsigned int swizzled_offset_2 = swizzled_offset_1 ^ 0b111000;
   const uint32_t src_addr_1 = cvta_to_shared_u32(src + swizzled_offset_1);
   const uint32_t src_addr_2 = cvta_to_shared_u32(src + swizzled_offset_2);
   constexpr unsigned int row_offset = smem_stride * 8 * sizeof(half);
@@ -36,11 +36,60 @@ __device__ __forceinline__ void ldmatrix_b_(
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[block_row][4]), "=r"(reg_[block_row][5]), "=r"(reg_[block_row][6]), "=r"(reg_[block_row][7])
+      : "=r"(reg_[block_row][7]), "=r"(reg_[block_row][6]), "=r"(reg_[block_row][5]), "=r"(reg_[block_row][4])
       : "r"(src_addr_2 + block_row * row_offset)
     );
   }
 }
+
+template <unsigned int smem_stride>
+__device__ __forceinline__ void ldmatrix_a_(
+  half* src,
+  half (&reg)[4][8][4]
+)
+{
+  uint32_t (&reg_) [4][8][2] = reinterpret_cast<uint32_t(&)[4][8][2]>(reg);
+  // const unsigned int logical_offset_1 = (threadIdx.x % 32) * smem_stride;
+  // const unsigned int logical_offset_2 = ((threadIdx.x % 32) + 32) * smem_stride;
+  // const unsigned int swizzled_offset_1 = logical_offset_1 ^ ((logical_offset_1 & 0b111000000) >> 3);
+  // const unsigned int swizzled_offset_2 = logical_offset_2 ^ ((logical_offset_2 & 0b111000000) >> 3);
+  uint32_t src_addr_1 = cvta_to_shared_u32(src);
+  uint32_t src_addr_2 = cvta_to_shared_u32(src + 32 * smem_stride);
+  static constexpr int offsets[8] = {
+    0 * smem_stride,
+    1 * smem_stride,
+    2 * smem_stride,
+    3 * smem_stride,
+    4 * smem_stride,
+    5 * smem_stride,
+    6 * smem_stride,
+    7 * smem_stride
+  };
+
+  #pragma unroll 8
+  for (int block_col = 0; block_col < 8; block_col++)
+  {
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][block_col][0]), "=r"(reg_[0][block_col][1]), "=r"(reg_[1][block_col][0]), "=r"(reg_[1][block_col][1])
+        : "r"(src_addr_1)
+    );
+      asm volatile (
+          "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+          "{%0, %1, %2, %3}, [%4];"
+          : "=r"(reg_[2][block_col][0]), "=r"(reg_[2][block_col][1]), "=r"(reg_[3][block_col][0]), "=r"(reg_[3][block_col][1])
+          : "r"(src_addr_2)
+    );
+  }
+}
+
+
+
+
+
+
+
 
 
 
@@ -169,11 +218,21 @@ kernel_8(half* A,
 
   half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
   half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
+  // uint32_t (&A_mma_tile_reg_) [mma_tiles_per_warp_m][mma_tiles_per_warp_k][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2]>(reg);
+  // uint32_t (&B_mma_tile_reg_) [mma_tiles_per_warp_k][mma_tiles_per_warp_n] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_k][mma_tiles_per_warp_n]>(reg);
+
   float4 A_gmem_cache_reg[8];
   float4 B_gmem_cache_reg[4];
   static_assert(BM_dim == 256, "BM_dim must be 256");
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
+
+    // load first group of tiles from a and b from smem->register
+    // unsigned int A_thread_logical_offset_1 = (threadIdx.x % 32) * BK_dim;
+    // unsigned int A_thread_logical_offset_2 = ((threadIdx.x % 32) + 32) * BK_dim;
+    // unsigned int A_thread_swizzled_offset_1 = A_thread_logical_offset_1 ^ ((A_thread_logical_offset_1 & 0b111000000) >> 3);
+    // unsigned int A_thread_swizzled_offset_2 = A_thread_logical_offset_2 ^ ((A_thread_logical_offset_2 & 0b111000000) >> 3);
+    // uint32_t A_src_addr = cvta_to_shared_u32(src + swizzled_offset);
 
     if (block_k != num_block_tiles_k)
     {
@@ -211,10 +270,9 @@ kernel_8(half* A,
         B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
       }
     }
-    ldmatrix_a(
+    ldmatrix_a_<BK_dim>(
       A_smem_ + (warp_m * WM_dim) * BK_dim,
-      A_mma_tile_reg,
-      BK_dim
+      A_mma_tile_reg
     );
 
     ldmatrix_b_<BN_dim>(
