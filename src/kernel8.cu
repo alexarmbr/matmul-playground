@@ -8,17 +8,18 @@
 
 using namespace cute;
 
+template <unsigned int smem_stride>
 __device__ __forceinline__ void ldmatrix_b_(
   half* src,
-  half (&reg)[8][8][2],
-  const unsigned int smem_stride
+  half (&reg)[8][8][2]
 )
 {
   uint32_t (&reg_) [8][8] = reinterpret_cast<uint32_t(&)[8][8]>(reg);
   const unsigned int thread_group = (threadIdx.x % 32) / 8;
   const unsigned int thread_row = threadIdx.x % 8;
   const unsigned thread_offset = (thread_row * smem_stride) + (thread_group * 8);
-  uint32_t src_addr = cvta_to_shared_u32(src + thread_offset);
+  const uint32_t src_addr = cvta_to_shared_u32(src + thread_offset);
+  constexpr unsigned int row_offset = smem_stride * 8 * sizeof(half);
 
   #pragma unroll 8
   for (int block_row = 0; block_row < 8; block_row++)
@@ -27,17 +28,14 @@ __device__ __forceinline__ void ldmatrix_b_(
       "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
       : "=r"(reg_[block_row][0]), "=r"(reg_[block_row][1]), "=r"(reg_[block_row][2]), "=r"(reg_[block_row][3])
-      : "r"(src_addr)
+      : "r"(src_addr + block_row * row_offset)
     );
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
       : "=r"(reg_[block_row][4]), "=r"(reg_[block_row][5]), "=r"(reg_[block_row][6]), "=r"(reg_[block_row][7])
-      : "r"(src_addr + 64)
+      : "r"(src_addr + block_row * row_offset + 64)
     );
-    
-    // move down rows to next 8x8 block
-    src_addr += smem_stride * 8 * sizeof(half);
   }
 }
 
@@ -215,10 +213,10 @@ kernel_8(half* A,
       A_mma_tile_reg,
       BK_dim
     );
-    ldmatrix_b_(
+
+    ldmatrix_b_<BN_dim>(
       B_smem_ + (warp_n * WN_dim),
-      B_mma_tile_reg,
-      BN_dim
+      B_mma_tile_reg
     );
 
 
