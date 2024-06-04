@@ -193,7 +193,7 @@ kernel_9(half* A,
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
   // declare register storage for accumulators
-  half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][8];
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
@@ -212,10 +212,10 @@ kernel_9(half* A,
   
 
   half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-  half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
+  half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][4];
   uint32_t (&A_mma_tile_reg_) [mma_tiles_per_warp_m][mma_tiles_per_warp_k][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2]>(A_mma_tile_reg);
-  uint32_t (&B_mma_tile_reg_) [mma_tiles_per_warp_k][mma_tiles_per_warp_n] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_k][mma_tiles_per_warp_n]>(B_mma_tile_reg);
-  uint32_t (&acc_register_) [mma_tiles_per_warp_m][mma_tiles_per_warp_n][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2]>(acc_register);
+  uint32_t (&B_mma_tile_reg_) [mma_tiles_per_warp_k][mma_tiles_per_warp_n][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2]>(B_mma_tile_reg);
+  uint32_t (&acc_register_) [mma_tiles_per_warp_m][mma_tiles_per_warp_n][4] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4]>(acc_register);
 
   float4 A_gmem_cache_reg[8];
   float4 B_gmem_cache_reg[4];
@@ -280,19 +280,19 @@ kernel_9(half* A,
     // #pragma unroll 8
     // for (int block_row = 0; block_row < 8; block_row++)
     // {
-      const unsigned int block_row = 0;
-      asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-        "{%0, %1, %2, %3}, [%4];"
-        : "=r"(B_mma_tile_reg_[block_row][0]), "=r"(B_mma_tile_reg_[block_row][1]), "=r"(B_mma_tile_reg_[block_row][2]), "=r"(B_mma_tile_reg_[block_row][3])
-        : "r"(B_src_addr_1 + block_row * row_offset)
-      );
-      asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-        "{%0, %1, %2, %3}, [%4];"
-        : "=r"(B_mma_tile_reg_[block_row][7]), "=r"(B_mma_tile_reg_[block_row][6]), "=r"(B_mma_tile_reg_[block_row][5]), "=r"(B_mma_tile_reg_[block_row][4])
-        : "r"(B_src_addr_2 + block_row * row_offset)
-      );
+      // const unsigned int block_row = 0;
+      // asm volatile (
+      //   "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      //   "{%0, %1, %2, %3}, [%4];"
+      //   : "=r"(B_mma_tile_reg_[block_row][0]), "=r"(B_mma_tile_reg_[block_row][1]), "=r"(B_mma_tile_reg_[block_row][2]), "=r"(B_mma_tile_reg_[block_row][3])
+      //   : "r"(B_src_addr_1 + block_row * row_offset)
+      // );
+      // asm volatile (
+      //   "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      //   "{%0, %1, %2, %3}, [%4];"
+      //   : "=r"(B_mma_tile_reg_[block_row][7]), "=r"(B_mma_tile_reg_[block_row][6]), "=r"(B_mma_tile_reg_[block_row][5]), "=r"(B_mma_tile_reg_[block_row][4])
+      //   : "r"(B_src_addr_2 + block_row * row_offset)
+      // );
     // }
 
 
@@ -344,35 +344,74 @@ kernel_9(half* A,
 
 
     // outer product between tiles of a and b
+    // #pragma unroll
+    // for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+    // {
+    //   #pragma unroll
+    //   for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+    //   {
+    //     #pragma unroll
+    //     for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+    //     {
+    //       // mma_sync_m16n8k8(
+    //       //   acc_register[mma_m][mma_n],
+    //       //   A_mma_tile_reg[mma_m][mma_k-1],
+    //       //   B_mma_tile_reg[mma_k-1][mma_n],
+    //       //   acc_register[mma_m][mma_n]
+    //       // );
+    //         asm volatile (
+    //           "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+    //           "{%0, %1}, "
+    //           "{%2, %3}, "
+    //           "{%4}, "
+    //           "{%5, %6};"
+    //           : "=r"(acc_register_[mma_m][mma_n][0]), "=r"(acc_register_[mma_m][mma_n][1])
+    //           : "r"(A_mma_tile_reg_[mma_m][mma_k][0]), "r"(A_mma_tile_reg_[mma_m][mma_k][1]),
+    //             "r"(B_mma_tile_reg_[mma_m][mma_k]),
+    //             "r"(acc_register_[mma_m][mma_n][0]), "r"(acc_register_[mma_m][mma_n][1])
+    //       );
+    //     }
+    //   }
+    // }
+
     #pragma unroll
-    for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+    for (unsigned int mma_k = 0; mma_k < 8; mma_k++)
     {
       #pragma unroll
-      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      for (unsigned int mma_n = 0; mma_n < 4; mma_n++)
       {
         #pragma unroll
-        for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+        for (unsigned int mma_m = 0; mma_m < 4; mma_m++)
         {
-          // mma_sync_m16n8k8(
-          //   acc_register[mma_m][mma_n],
-          //   A_mma_tile_reg[mma_m][mma_k-1],
-          //   B_mma_tile_reg[mma_k-1][mma_n],
-          //   acc_register[mma_m][mma_n]
+          //   asm volatile (
+          //     "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+          //     "{%0, %1}, "
+          //     "{%2, %3}, "
+          //     "{%4}, "
+          //     "{%5, %6};"
+          //     : "=r"(acc_register_[mma_m][mma_n][0]), "=r"(acc_register_[mma_m][mma_n][1])
+          //     : "r"(A_mma_tile_reg_[mma_m][mma_k][0]), "r"(A_mma_tile_reg_[mma_m][mma_k][1]),
+          //       "r"(B_mma_tile_reg_[mma_m][mma_k]),
+          //       "r"(acc_register_[mma_m][mma_n][0]), "r"(acc_register_[mma_m][mma_n][1])
           // );
             asm volatile (
-              "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
-              "{%0, %1}, "
-              "{%2, %3}, "
-              "{%4}, "
-              "{%5, %6};"
-              : "=r"(acc_register_[mma_m][mma_n][0]), "=r"(acc_register_[mma_m][mma_n][1])
+              "mma.sync.aligned.m8n8k4.row.col.f16.f16.f16.f16 "
+              "{%0, %1, %2, %3}, "
+              "{%4, %5}, "
+              "{%6, %7}, "
+              "{%8, %9, %10, %11};"
+              : "=r"(acc_register_[mma_m][mma_n][0]), "=r"(acc_register_[mma_m][mma_n][1]), "=r"(acc_register_[mma_m][mma_n][2]), "=r"(acc_register_[mma_m][mma_n][3])
               : "r"(A_mma_tile_reg_[mma_m][mma_k][0]), "r"(A_mma_tile_reg_[mma_m][mma_k][1]),
-                "r"(B_mma_tile_reg_[mma_m][mma_k]),
-                "r"(acc_register_[mma_m][mma_n][0]), "r"(acc_register_[mma_m][mma_n][1])
-          );
+                "r"(B_mma_tile_reg_[mma_m][mma_k][0]), "r"(B_mma_tile_reg_[mma_m][mma_k][1]),
+                "r"(acc_register_[mma_m][mma_n][0]), "r"(acc_register_[mma_m][mma_n][1]), "r"(acc_register_[mma_m][mma_n][2]), "r"(acc_register_[mma_m][mma_n][3])
+            );
         }
       }
     }
+
+
+
+
 
     __syncthreads();
 
@@ -425,14 +464,14 @@ kernel_9(half* A,
       }
   }
 
-  for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-  {
-      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-      {
-        Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
-      }
-  }
+  // for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+  // {
+  //     for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+  //     {
+  //       Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
+  //       stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
+  //     }
+  // }
 }
 
 void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
