@@ -2,6 +2,10 @@
 #include <cuda.h>
 #include <assert.h>
 
+// static constexpr uint32_t thread_shmem_row_map[32] = {0, 1, 2, 3, 8, 9, 10, 11, 0, 1, 2, 3, 8, 9, 10, 11, 4, 5, 6, 7, 12, 13, 14, 15, 4, 5, 6, 7, 12, 13, 14, 15};
+// static constexpr uint32_t thread_shmem_col_map[32] = {0 ,0, 0, 0, 0, 0, 0,  0,  1, 1, 1, 1, 1, 1, 1,  1,  0, 0, 0, 0, 0,  0,  0,  0,  1, 1, 1, 1, 1,  1,  1,  1};
+
+
 template<unsigned int TILE_ROWS,
 unsigned int TILE_COLS>
 __device__ void tileMemcpyTranspose(
@@ -203,6 +207,42 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
     reg_[1] = src_ptr[fragment_row * src_stride_bytes + fragment_col];
 }
 
+__device__ __forceinline__ void ldmatrix_m16n16_gmem(
+    half* src,
+    half (&reg)[8],
+    const unsigned int src_stride_bytes
+)
+{
+    const unsigned int laneIdx = threadIdx.x % 32;
+    float4 &reg_= reinterpret_cast<float4&>(reg);
+    const unsigned int src_stride_float4 = src_stride_bytes / sizeof(float4);
+    const float4* src_ptr = reinterpret_cast<float4*>(src);
+    // const float4* thread_ptr = src_ptr + (thread_shmem_row_map[laneIdx] * src_stride_float4) + thread_shmem_col_map[laneIdx];
+    const float4* thread_ptr = src_ptr + (laneIdx * src_stride_float4) + (laneIdx / 16);
+    reg_ = *thread_ptr;
+}
+
+
+__device__ __forceinline__ void stmatrix_m16n16_gmem(
+    half* dst,
+    half (&reg)[8],
+    const unsigned int dst_stride_bytes
+)
+{
+    const unsigned int laneIdx = threadIdx.x % 32;
+    float4 &reg_= reinterpret_cast<float4&>(reg);
+    const unsigned int dst_stride_float4 = dst_stride_bytes / sizeof(float4);
+    const float4* dst_ptr = reinterpret_cast<float4*>(dst);
+    // const float4* thread_ptr = dst_ptr + (thread_shmem_row_map[laneIdx] * dst_stride_float4) + thread_shmem_col_map[laneIdx];
+    const float4* thread_ptr = dst_ptr + (laneIdx * dst_stride_float4) + (laneIdx / 16);
+    reg_ = *thread_ptr;
+}
+
+
+
+
+
+
 
 __device__ __forceinline__ void ldmatrix_a(
     half* src,
@@ -216,7 +256,7 @@ __device__ __forceinline__ void ldmatrix_a(
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
 
-    constexpr int x_thread = 0;
+    // constexpr int x_thread = 0;
     
     // 0
     asm volatile (
@@ -454,7 +494,7 @@ __device__ __forceinline__ void ldmatrix_b(
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
 
-    constexpr int x_thread = 0;
+    // constexpr int x_thread = 0;
     asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
@@ -699,7 +739,7 @@ __device__ __forceinline__ void ldmatrix_a_phase1(
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
 
-    constexpr int x_thread = 0;
+    // constexpr int x_thread = 0;
     
     // 0
     asm volatile (
@@ -823,7 +863,7 @@ __device__ __forceinline__ void ldmatrix_a_phase2(
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
 
-    constexpr int x_thread = 0;
+    // constexpr int x_thread = 0;
 
     // 4
     asm volatile (
@@ -952,7 +992,7 @@ __device__ __forceinline__ void ldmatrix_b_phase1(
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
 
-    constexpr int x_thread = 0;
+    // constexpr int x_thread = 0;
     asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
@@ -1074,7 +1114,7 @@ __device__ __forceinline__ void ldmatrix_b_phase2(
     uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
 
-    constexpr int x_thread = 0;
+    // constexpr int x_thread = 0;
 
     // 0
     asm volatile (
