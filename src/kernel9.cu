@@ -109,7 +109,7 @@ kernel_9(half* A,
 {
 
   constexpr unsigned int MMA_M_dim = 16;
-  constexpr unsigned int MMA_N_dim = 8;
+  constexpr unsigned int MMA_N_dim = 16;
   constexpr unsigned int MMA_K_dim = 8;
 
   // loop bounds
@@ -202,6 +202,10 @@ kernel_9(half* A,
         acc_register[mma_m][mma_n][1] = 0;
         acc_register[mma_m][mma_n][2] = 0;
         acc_register[mma_m][mma_n][3] = 0;
+        acc_register[mma_m][mma_n][4] = 0;
+        acc_register[mma_m][mma_n][5] = 0;
+        acc_register[mma_m][mma_n][6] = 0;
+        acc_register[mma_m][mma_n][7] = 0;
       }
   }
 
@@ -461,18 +465,24 @@ kernel_9(half* A,
         acc_register[mma_m][mma_n][1] = acc_register[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
         acc_register[mma_m][mma_n][2] = acc_register[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
         acc_register[mma_m][mma_n][3] = acc_register[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
+        acc_register[mma_m][mma_n][4] = acc_register[mma_m][mma_n][4] * alpha_ + C_register[mma_m][mma_n][4] * beta_;
+        acc_register[mma_m][mma_n][5] = acc_register[mma_m][mma_n][5] * alpha_ + C_register[mma_m][mma_n][5] * beta_;
+        acc_register[mma_m][mma_n][6] = acc_register[mma_m][mma_n][6] * alpha_ + C_register[mma_m][mma_n][6] * beta_;
+        acc_register[mma_m][mma_n][7] = acc_register[mma_m][mma_n][7] * alpha_ + C_register[mma_m][mma_n][7] * beta_;
       }
   }
 
-  // for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-  // {
-  //     for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-  //     {
-  //       Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-  //       stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
-  //     }
-  // }
+  for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+  {
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      {
+        Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
+        stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
+      }
+  }
 }
+
+
 
 void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
