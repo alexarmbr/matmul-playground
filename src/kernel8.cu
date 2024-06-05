@@ -295,42 +295,42 @@ kernel_8(half* A,
     // }
 
 
-    if (block_k != num_block_tiles_k)
-    {
+    // if (block_k != num_block_tiles_k)
+    // {
       Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
       Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
       // copy tile of A from global memory to registers
       // we want these memory requests to be in flight while the mmas are being computed
-      {
-        constexpr unsigned int float4_cols = BK_dim / 8; // 8
-        Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(A_block_tile.data()), make_shape(BM_dim, float4_cols), make_stride(K / 8, 1));
-        unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-        const unsigned int thread_idx_y = thread_idx / float4_cols;
-        const unsigned int thread_idx_x = thread_idx % float4_cols;
+      // {
+        constexpr unsigned int A_float4_cols = BK_dim / 8; // 8
+        Tensor A_src_float4 = make_tensor(reinterpret_cast<float4*>(A_block_tile.data()), make_shape(BM_dim, A_float4_cols), make_stride(K / 8, 1));
+        unsigned int A_thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+        const unsigned int A_thread_idx_y = A_thread_idx / A_float4_cols;
+        const unsigned int A_thread_idx_x = A_thread_idx % A_float4_cols;
 
-        A_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-        A_gmem_cache_reg[1] = src_float4(thread_idx_y + 32, thread_idx_x);
-        A_gmem_cache_reg[2] = src_float4(thread_idx_y + 64, thread_idx_x);
-        A_gmem_cache_reg[3] = src_float4(thread_idx_y + 96, thread_idx_x);
-        A_gmem_cache_reg[4] = src_float4(thread_idx_y + 128, thread_idx_x);
-        A_gmem_cache_reg[5] = src_float4(thread_idx_y + 160, thread_idx_x);
-        A_gmem_cache_reg[6] = src_float4(thread_idx_y + 192, thread_idx_x);
-        A_gmem_cache_reg[7] = src_float4(thread_idx_y + 224, thread_idx_x);
-      }
+        A_gmem_cache_reg[0] = A_src_float4(A_thread_idx_y, A_thread_idx_x);
+        A_gmem_cache_reg[1] = A_src_float4(A_thread_idx_y + 32, A_thread_idx_x);
+        A_gmem_cache_reg[2] = A_src_float4(A_thread_idx_y + 64, A_thread_idx_x);
+        A_gmem_cache_reg[3] = A_src_float4(A_thread_idx_y + 96, A_thread_idx_x);
+        A_gmem_cache_reg[4] = A_src_float4(A_thread_idx_y + 128, A_thread_idx_x);
+        A_gmem_cache_reg[5] = A_src_float4(A_thread_idx_y + 160, A_thread_idx_x);
+        A_gmem_cache_reg[6] = A_src_float4(A_thread_idx_y + 192, A_thread_idx_x);
+        A_gmem_cache_reg[7] = A_src_float4(A_thread_idx_y + 224, A_thread_idx_x);
+      // }
 
       // copy tile of B from global memory to registers
-      {
-        constexpr unsigned int float4_cols = BN_dim / 8; // 16
-        Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(B_block_tile.data()), make_shape(BK_dim, float4_cols), make_stride(N / 8, 1));
-        unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-        const unsigned int thread_idx_y = thread_idx / float4_cols;
-        const unsigned int thread_idx_x = thread_idx % float4_cols;
-        B_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-        B_gmem_cache_reg[1] = src_float4(thread_idx_y + 16, thread_idx_x);
-        B_gmem_cache_reg[2] = src_float4(thread_idx_y + 32, thread_idx_x);
-        B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
-      }
-    }
+      // {
+        constexpr unsigned int B_float4_cols = BN_dim / 8; // 16
+        Tensor B_src_float4 = make_tensor(reinterpret_cast<float4*>(B_block_tile.data()), make_shape(BK_dim, B_float4_cols), make_stride(N / 8, 1));
+        unsigned int B_thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+        const unsigned int B_thread_idx_y = B_thread_idx / B_float4_cols;
+        const unsigned int B_thread_idx_x = B_thread_idx % B_float4_cols;
+        B_gmem_cache_reg[0] = B_src_float4(B_thread_idx_y, B_thread_idx_x);
+        B_gmem_cache_reg[1] = B_src_float4(B_thread_idx_y + 16, B_thread_idx_x);
+        B_gmem_cache_reg[2] = B_src_float4(B_thread_idx_y + 32, B_thread_idx_x);
+        B_gmem_cache_reg[3] = B_src_float4(B_thread_idx_y + 48, B_thread_idx_x);
+      // }
+    // }
     // ldmatrix_a_<BK_dim>(
     //   A_smem_ + (warp_m * WM_dim) * BK_dim,
     //   A_mma_tile_reg
