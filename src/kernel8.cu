@@ -295,8 +295,8 @@ kernel_8(half* A,
     // }
 
 
-    // if (block_k != num_block_tiles_k)
-    // {
+    if (block_k != num_block_tiles_k)
+    {
       Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
       Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
       // copy tile of A from global memory to registers
@@ -330,7 +330,7 @@ kernel_8(half* A,
         B_gmem_cache_reg[2] = B_src_float4(B_thread_idx_y + 32, B_thread_idx_x);
         B_gmem_cache_reg[3] = B_src_float4(B_thread_idx_y + 48, B_thread_idx_x);
       // }
-    // }
+    }
     // ldmatrix_a_<BK_dim>(
     //   A_smem_ + (warp_m * WM_dim) * BK_dim,
     //   A_mma_tile_reg
