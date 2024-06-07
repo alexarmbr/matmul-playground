@@ -246,7 +246,7 @@ __device__ __forceinline__ void stmatrix_m16n16_gmem(
 
 __device__ __forceinline__ void ldmatrix_a(
     half* src,
-    half (&reg)[4][8][4],
+    half (&reg)[4][4][4],
     const unsigned int smem_stride
 )
 {
@@ -482,7 +482,7 @@ __device__ __forceinline__ void ldmatrix_a(
 
 __device__ __forceinline__ void ldmatrix_b(
     half* src,
-    half (&reg)[8][8][2],
+    half (&reg)[4][8][2],
     const unsigned int smem_stride,
     half alpha
 
@@ -1245,7 +1245,8 @@ __device__ void tileMemcpySwizzleUnrolled_A(half* src, half* dst, const unsigned
         const unsigned int thread_idx_x = thread_idx % BK_dim_float4;
         const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
         unsigned int dst_ind = thread_idx_y * BK_dim_float4 + thread_idx_x;
-        dst_ind = dst_ind ^ ((dst_ind & 0b111000) >> 3);
+        dst_ind = dst_ind ^ ((dst_ind & 0b10000) >> 4);
+        dst_ind = dst_ind ^ ((dst_ind & 0b1100) >> 2);
         dst_float4[dst_ind] = src_float4[src_ind];
         thread_idx += num_threads;
     }
