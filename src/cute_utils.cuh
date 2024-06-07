@@ -112,11 +112,6 @@ __device__ void tileMemcpyUnrolled(TensorSrc src, TensorDst dst, const unsigned 
 }
 
 
-
-
-
-
-
 template <class Tensor>
 __device__ __forceinline__ void ldmatrix_m16n8(
   Tensor T,

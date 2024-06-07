@@ -15,8 +15,7 @@ unsigned int BK_dim,
 unsigned int WM_dim,
 unsigned int WN_dim,
 unsigned int WK_dim,
-unsigned int A_swizzle_bits,
-unsigned int B_swizzle_bits>
+unsigned int num_threads>
 __global__ void
 kernel_9(half* A,
   half* B,
@@ -121,8 +120,8 @@ kernel_9(half* A,
 
   Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, 0));
   Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(0, block_n));
-  tileMemcpySwizzleUnrolled_A<BM_dim, BK_dim>(A_block_tile.data(), A_smem_);
-  tileMemcpySwizzleUnrolled_B<BK_dim, BN_dim>(B_block_tile.data(), B_smem_);
+  tileMemcpySwizzleUnrolled_A<BM_dim, BK_dim>(A_block_tile.data(), A_smem_, K);
+  tileMemcpySwizzleUnrolled_B<BK_dim, BN_dim>(B_block_tile.data(), B_smem_, N);
   
 
   half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
@@ -205,35 +204,57 @@ kernel_9(half* A,
     __syncthreads();
 
     {
-      constexpr unsigned int float4_cols = BK_dim / 8; // 8
-      auto swizzled_layout = composition(Swizzle<3,0,A_swizzle_bits>{}, make_layout(make_shape(BM_dim, float4_cols), make_stride(BK_dim / 8, 1)));
-      // auto dst_layout = make_layout(make_shape(BM_dim, float4_cols), make_stride(BK_dim / 8, 1));
-      Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(A_smem_), swizzled_layout);
-      unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-      unsigned int thread_idx_y = thread_idx / float4_cols;
-      unsigned int thread_idx_x = thread_idx % float4_cols;
-      dst_float4(thread_idx_y, thread_idx_x) = A_gmem_cache_reg[0];
-      dst_float4(thread_idx_y + 32, thread_idx_x) = A_gmem_cache_reg[1];
-      dst_float4(thread_idx_y + 64, thread_idx_x) = A_gmem_cache_reg[2];
-      dst_float4(thread_idx_y + 96, thread_idx_x) = A_gmem_cache_reg[3];
-      dst_float4(thread_idx_y + 128, thread_idx_x) = A_gmem_cache_reg[4];
-      dst_float4(thread_idx_y + 160, thread_idx_x) = A_gmem_cache_reg[5];
-      dst_float4(thread_idx_y + 192, thread_idx_x) = A_gmem_cache_reg[6];
-      dst_float4(thread_idx_y + 224, thread_idx_x) = A_gmem_cache_reg[7];
+      // constexpr unsigned int float4_cols = BK_dim / 8; // 8
+      // auto swizzled_layout = composition(Swizzle<3,0,A_swizzle_bits>{}, make_layout(make_shape(BM_dim, float4_cols), make_stride(BK_dim / 8, 1)));
+      // // auto dst_layout = make_layout(make_shape(BM_dim, float4_cols), make_stride(BK_dim / 8, 1));
+      // Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(A_smem_), swizzled_layout);
+      // unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+      // unsigned int thread_idx_y = thread_idx / float4_cols;
+      // unsigned int thread_idx_x = thread_idx % float4_cols;
+      // dst_float4(thread_idx_y, thread_idx_x) = A_gmem_cache_reg[0];
+      // dst_float4(thread_idx_y + 32, thread_idx_x) = A_gmem_cache_reg[1];
+      // dst_float4(thread_idx_y + 64, thread_idx_x) = A_gmem_cache_reg[2];
+      // dst_float4(thread_idx_y + 96, thread_idx_x) = A_gmem_cache_reg[3];
+      // dst_float4(thread_idx_y + 128, thread_idx_x) = A_gmem_cache_reg[4];
+      // dst_float4(thread_idx_y + 160, thread_idx_x) = A_gmem_cache_reg[5];
+      // dst_float4(thread_idx_y + 192, thread_idx_x) = A_gmem_cache_reg[6];
+      // dst_float4(thread_idx_y + 224, thread_idx_x) = A_gmem_cache_reg[7];
+      float4* A_smem_float4 = reinterpret_cast<float4*>(A_smem_);
+      int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+      constexpr unsigned int iterations = BM_dim * (BK_dim / 8) / num_threads;
+      
+      #pragma unroll
+      for (int i = 0; i < iterations; i++)
+      {
+        const unsigned int dst_ind = thread_idx ^ ((thread_idx & 0b111000) >> 3);
+        A_smem_float4[dst_ind] = A_gmem_cache_reg[i];
+        thread_idx += num_threads;
+      }
     }
 
     {
-      constexpr unsigned int float4_cols = BN_dim / 8; // 16
-      auto swizzled_layout = composition(Swizzle<3,0,B_swizzle_bits>{}, make_layout(make_shape(BK_dim, float4_cols), make_stride(BN_dim / 8, 1)));
-      // auto dst_layout = make_layout(make_shape(BK_dim, float4_cols), make_stride(BN_dim / 8, 1));
-      unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-      unsigned int thread_idx_y = thread_idx / float4_cols;
-      unsigned int thread_idx_x = thread_idx % float4_cols;
-      Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(B_smem_), swizzled_layout);
-      dst_float4(thread_idx_y, thread_idx_x) = B_gmem_cache_reg[0];
-      dst_float4(thread_idx_y + 16, thread_idx_x) = B_gmem_cache_reg[1];
-      dst_float4(thread_idx_y + 32, thread_idx_x) = B_gmem_cache_reg[2];
-      dst_float4(thread_idx_y + 48, thread_idx_x) = B_gmem_cache_reg[3];
+      // constexpr unsigned int float4_cols = BN_dim / 8; // 16
+      // auto swizzled_layout = composition(Swizzle<3,0,B_swizzle_bits>{}, make_layout(make_shape(BK_dim, float4_cols), make_stride(BN_dim / 8, 1)));
+      // // auto dst_layout = make_layout(make_shape(BK_dim, float4_cols), make_stride(BN_dim / 8, 1));
+      // unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+      // unsigned int thread_idx_y = thread_idx / float4_cols;
+      // unsigned int thread_idx_x = thread_idx % float4_cols;
+      // Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(B_smem_), swizzled_layout);
+      // dst_float4(thread_idx_y, thread_idx_x) = B_gmem_cache_reg[0];
+      // dst_float4(thread_idx_y + 16, thread_idx_x) = B_gmem_cache_reg[1];
+      // dst_float4(thread_idx_y + 32, thread_idx_x) = B_gmem_cache_reg[2];
+      // dst_float4(thread_idx_y + 48, thread_idx_x) = B_gmem_cache_reg[3];
+      float4* B_smem_float4 = reinterpret_cast<float4*>(B_smem_);
+      int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+      constexpr unsigned int iterations = BK_dim * (BN_dim / 8) / num_threads;
+
+      #pragma unroll
+      for (int i = 0; i < iterations; i++)
+      {
+        const unsigned int dst_ind = thread_idx ^ ((thread_idx & 0b1110000) >> 4);
+        B_smem_float4[dst_ind] = B_gmem_cache_reg[i];
+        thread_idx += num_threads;
+      }
     }
   }
 
@@ -289,16 +310,17 @@ void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int WARP_SIZE = 32;
     const unsigned int BlocksM = M / BM_dim;
     const unsigned int BlocksN = N / BN_dim;
-    const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
-    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
-    const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
-    constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
-    constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
+    constexpr unsigned int ThreadsM = WARPS_PER_BLOCK_M;
+    constexpr unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
+    constexpr unsigned int num_threads = ThreadsM * ThreadsN;
+    constexpr unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+    // constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
+    // constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
 
     dim3 gridDim(BlocksN * BlocksM, 1);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_9<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_9<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, num_threads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
@@ -307,7 +329,7 @@ void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
         timer.Start();
         kernel_9
         <BM_dim, BN_dim, BK_dim,
-        WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>
+        WM_dim, WN_dim, WK_dim, num_threads>
         <<<gridDim, blockDim, shmem_bytes>>>(
             device_sgemm_params.A,
             device_sgemm_params.B,

@@ -1227,7 +1227,7 @@ __device__ __forceinline__ void ldmatrix_b_phase2(
 
 
 template <unsigned int BM_dim, unsigned int BK_dim>
-__device__ void tileMemcpySwizzleUnrolled_A(half* src, half* dst)
+__device__ void tileMemcpySwizzleUnrolled_A(half* src, half* dst, const unsigned int src_stride_half)
 {
     float4* src_float4 = reinterpret_cast<float4*>(src);
     float4* dst_float4 = reinterpret_cast<float4*>(dst);
@@ -1235,20 +1235,24 @@ __device__ void tileMemcpySwizzleUnrolled_A(half* src, half* dst)
     int num_threads = blockDim.x * blockDim.y;
     constexpr unsigned int BK_dim_float4 = BK_dim / 8;
     constexpr unsigned int TILE_SIZE = BM_dim * BK_dim_float4;
+    const unsigned int src_stride_float4 = src_stride_half / 8;
 
 
     #pragma unroll 8
     while (thread_idx < TILE_SIZE)
     {
-        const unsigned int src_ind = thread_idx;
-        const unsigned int dst_ind = src_ind ^ ((src_ind & 0b111000) >> 3);
+        const unsigned int thread_idx_y = thread_idx / BK_dim_float4;
+        const unsigned int thread_idx_x = thread_idx % BK_dim_float4;
+        const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
+        unsigned int dst_ind = thread_idx_y * BK_dim_float4 + thread_idx_x;
+        dst_ind = dst_ind ^ ((dst_ind & 0b111000) >> 3);
         dst_float4[dst_ind] = src_float4[src_ind];
         thread_idx += num_threads;
     }
 }
 
 template <unsigned int BK_dim, unsigned int BN_dim>
-__device__ void tileMemcpySwizzleUnrolled_B(half* src, half* dst)
+__device__ void tileMemcpySwizzleUnrolled_B(half* src, half* dst, const unsigned int src_stride_half)
 {
     float4* src_float4 = reinterpret_cast<float4*>(src);
     float4* dst_float4 = reinterpret_cast<float4*>(dst);
@@ -1256,12 +1260,16 @@ __device__ void tileMemcpySwizzleUnrolled_B(half* src, half* dst)
     int num_threads = blockDim.x * blockDim.y;
     constexpr unsigned int BN_dim_float4 = BN_dim / 8;
     constexpr unsigned int TILE_SIZE = BK_dim * BN_dim_float4;
+    const unsigned int src_stride_float4 = src_stride_half / 8;
 
     #pragma unroll 8
     while (thread_idx < TILE_SIZE)
     {
-        const unsigned int src_ind = thread_idx;
-        const unsigned int dst_ind = src_ind ^ ((src_ind & 0b1110000) >> 4);
+        const unsigned int thread_idx_y = thread_idx / BN_dim_float4;
+        const unsigned int thread_idx_x = thread_idx % BN_dim_float4;
+        const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
+        unsigned int dst_ind = thread_idx_y * BN_dim_float4 + thread_idx_x;
+        dst_ind = dst_ind ^ ((dst_ind & 0b1110000) >> 4);
         dst_float4[dst_ind] = src_float4[src_ind];
         thread_idx += num_threads;
     }
