@@ -9,6 +9,130 @@
 using namespace cute;
 
 
+template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k>
+__device__ __forceinline__ void ldmatrix_a_(
+  half* src,
+  half (&reg)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4],
+  const unsigned int smem_stride
+)
+{
+  static_assert(mma_tiles_per_warp_m == 4, "mma_tiles_per_warp_m must be 4");
+  static_assert(mma_tiles_per_warp_k == 4, "mma_tiles_per_warp_k must be 4");
+
+  uint32_t (&reg_) [mma_tiles_per_warp_m][mma_tiles_per_warp_k][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2]>(reg);
+  unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
+  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b10000000) >> 4);
+  swizzled_offset = swizzled_offset ^ ((swizzled_offset & 0b1100000) >> 2);
+  uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
+
+    // constexpr int x_thread = 0;
+    
+    // 0
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
+      : "r"(src_addr)
+    );
+    // if (thread0()) {
+    //     printf("0: %f\n", (float) reg[0][0][0]);
+    // }
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
+        : "r"(src_addr)
+    );
+    // if (thread0()) {
+    //     printf("1: %f\n", (float) reg[0][1][0]);
+    // }
+
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][2][0]), "=r"(reg_[0][2][1]), "=r"(reg_[1][2][0]), "=r"(reg_[1][2][1])
+        : "r"(src_addr)
+    );
+    // if (thread0()) {
+    //     printf("2: %f\n", (float) reg[0][2][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][3][0]), "=r"(reg_[0][3][1]), "=r"(reg_[1][3][0]), "=r"(reg_[1][3][1])
+        : "r"(src_addr)
+    );
+    // if (thread0()) {
+    //     printf("3: %f\n", (float) reg[0][3][0]);
+    // }
+
+    src_addr ^= 0b100000110000;
+
+
+    // 0
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[2][0][0]), "=r"(reg_[2][0][1]), "=r"(reg_[3][0][0]), "=r"(reg_[3][0][1])
+      : "r"(src_addr)
+    );
+    // if (thread0()) {
+    //     printf("0: %f\n", (float) reg[2][0][0]);
+    // }
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][1][0]), "=r"(reg_[2][1][1]), "=r"(reg_[3][1][0]), "=r"(reg_[3][1][1])
+        : "r"(src_addr)
+    );
+    // if (thread0()) {
+    //     printf("1: %f\n", (float) reg[2][1][0]);
+    // }
+
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][2][0]), "=r"(reg_[2][2][1]), "=r"(reg_[3][2][0]), "=r"(reg_[3][2][1])
+        : "r"(src_addr)
+    );
+    // if (thread0()) {
+    //     printf("2: %f\n", (float) reg[2][2][0]);
+    // }
+
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][3][0]), "=r"(reg_[2][3][1]), "=r"(reg_[3][3][0]), "=r"(reg_[3][3][1])
+        : "r"(src_addr)
+    );
+    // if (thread0()) {
+    //     printf("3: %f\n", (float) reg[2][3][0]);
+    // }
+
+}
+
+
+
+
 template <unsigned int BM_dim,
 unsigned int BN_dim,
 unsigned int BK_dim,
@@ -169,7 +293,10 @@ kernel_9(half* A,
         // B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
       }
     }
-    ldmatrix_a(
+ 
+    ldmatrix_a_
+    <mma_tiles_per_warp_m, mma_tiles_per_warp_k>
+    (
       A_smem_ + (warp_m * WM_dim) * BK_dim,
       A_mma_tile_reg,
       BK_dim
