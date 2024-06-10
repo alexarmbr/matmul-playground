@@ -9,6 +9,7 @@
 using namespace cute;
 
 __constant__ unsigned int increment_xor_patterns_A[2] = {0b10000, 0b110000};
+__constant__ unsigned int increment_xor_patterns_B[2] = {0b0, 0b111000};
 
 
 template <unsigned int _A_smem_stride_elements>
@@ -25,7 +26,7 @@ struct WarpTileIteratorA {
   }
 
   __device__ __forceinline__ uint32_t operator()(const unsigned int index) const {
-    return _offset + index * _A_smem_stride_elements;
+    return _offset + index * 32 * _A_smem_stride_elements;
   }
 
   __device__ __forceinline__ void operator++() {
@@ -33,6 +34,32 @@ struct WarpTileIteratorA {
     _count++;
   }
 };
+
+
+template <unsigned int _B_smem_stride_elements>
+struct WarpTileIteratorB {
+  half* _ptr;
+  unsigned int _offset;
+  unsigned int _count;
+
+  __device__ __forceinline__ WarpTileIteratorB(half* ptr) : _ptr(ptr), _offset(0), _count(0) {
+    const unsigned int thread_group = (threadIdx.x % 32) / 8;
+    const unsigned int thread_row = threadIdx.x % 8;
+    _offset = (thread_row * _B_smem_stride_elements) + (thread_group * 8); // logical offset
+    _offset = _offset ^ ((_offset & 0b1111000000) >> 4); // swizzled offset
+    _offset = cvta_to_shared_u32(_ptr + _offset); // convert to shmem address
+
+  }
+
+  __device__ __forceinline__ uint32_t operator()(const unsigned int index) const {
+    return (_offset ^ increment_xor_patterns_B[_count % 2]) + _count * 8 * _B_smem_stride_elements + index * 32;
+  }
+
+  __device__ __forceinline__ void operator++() {
+    _count = (_count + 1) % 4;
+  }
+};
+
 
 
 
@@ -170,7 +197,26 @@ kernel_10(half* A,
   tileMemcpySwizzleUnrolled_A<BM_dim, BK_dim>(A_block_tile.data(), A_smem_, K);
   tileMemcpySwizzleUnrolled_B<BK_dim, BN_dim>(B_block_tile.data(), B_smem_, N);
 
-  // copy 0th warp tile from smem -> register
+  // copy 0th k slice from smem -> register
+  asm volatile (
+    "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+    "{%0, %1, %2, %3}, [%4];"
+    : "=r"(A_mma_tile_reg_[0][0][0]), "=r"(A_mma_tile_reg_[0][0][1]), "=r"(A_mma_tile_reg_[1][0][0]), "=r"(A_mma_tile_reg_[1][0][1])
+    : "r"(A_warp_tile_iter(0))
+  );
+
+  asm volatile (
+    "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+    "{%0, %1, %2, %3}, [%4];"
+    : "=r"(A_mma_tile_reg_[2][0][0]), "=r"(A_mma_tile_reg_[2][0][1]), "=r"(A_mma_tile_reg_[3][0][0]), "=r"(A_mma_tile_reg_[3][0][1])
+    : "r"(A_warp_tile_iter(0))
+  );
+
+
+
+
+
+
 
   // static_assert(BM_dim == 256, "BM_dim must be 256");
   for (unsigned int block_k = 1; block_k <= block_tiles_k; block_k++)
@@ -179,14 +225,24 @@ kernel_10(half* A,
     {
       if (block_k == 1 && thread0())
       {
+        // asm volatile (
+        //   "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        //   "{%0, %1, %2, %3}, [%4];"
+        //   : "=r"(A_mma_tile_reg_[0][0][0]), "=r"(A_mma_tile_reg_[0][0][1]), "=r"(A_mma_tile_reg_[1][0][0]), "=r"(A_mma_tile_reg_[1][0][1])
+        //   : "r"(A_warp_tile_iter(1))
+        // );
+        // printf("%d, %d: %f\n", mma_k, A_warp_tile_iter(0), (float) A_mma_tile_reg[0][0][0]);
+        // ++A_warp_tile_iter;
+
         asm volatile (
-          "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+          "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
           "{%0, %1, %2, %3}, [%4];"
-          : "=r"(A_mma_tile_reg_[0][0][0]), "=r"(A_mma_tile_reg_[0][0][1]), "=r"(A_mma_tile_reg_[1][0][0]), "=r"(A_mma_tile_reg_[1][0][1])
-          : "r"(A_warp_tile_iter(0))
+          : "=r"(B_mma_tile_reg_[block_row][0]), "=r"(B_mma_tile_reg_[block_row][1]), "=r"(B_mma_tile_reg_[block_row][2]), "=r"(B_mma_tile_reg_[block_row][3])
+          : "r"(B_src_addr_1 + block_row * row_offset)
         );
-        printf("%d, %d: %f\n", mma_k, A_warp_tile_iter(0), (float) A_mma_tile_reg_[0][0][0]);
-        ++A_warp_tile_iter;
+        
+
+
       }
 
 
