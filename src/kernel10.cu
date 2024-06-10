@@ -8,128 +8,31 @@
 
 using namespace cute;
 
-
-template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k>
-__device__ __forceinline__ void ldmatrix_a_(
-  half* src,
-  half (&reg)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4],
-  const unsigned int smem_stride
-)
-{
-  static_assert(mma_tiles_per_warp_m == 4, "mma_tiles_per_warp_m must be 4");
-  static_assert(mma_tiles_per_warp_k == 4, "mma_tiles_per_warp_k must be 4");
-
-  uint32_t (&reg_) [mma_tiles_per_warp_m][mma_tiles_per_warp_k][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2]>(reg);
-  unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
-  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b10000000) >> 4);
-  swizzled_offset = swizzled_offset ^ ((swizzled_offset & 0b1100000) >> 2);
-  uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
-
-    // constexpr int x_thread = 0;
-    
-    // 0
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
-      : "r"(src_addr)
-    );
-    // if (thread0()) {
-    //     printf("0: %f\n", (float) reg[0][0][0]);
-    // }
-    src_addr ^= 0b10000;
-    
-    // 1
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-        "{%0, %1, %2, %3}, [%4];"
-        : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
-        : "r"(src_addr)
-    );
-    // if (thread0()) {
-    //     printf("1: %f\n", (float) reg[0][1][0]);
-    // }
-
-    src_addr ^= 0b110000;
-
-    // 2
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-        "{%0, %1, %2, %3}, [%4];"
-        : "=r"(reg_[0][2][0]), "=r"(reg_[0][2][1]), "=r"(reg_[1][2][0]), "=r"(reg_[1][2][1])
-        : "r"(src_addr)
-    );
-    // if (thread0()) {
-    //     printf("2: %f\n", (float) reg[0][2][0]);
-    // }
-
-    src_addr ^= 0b10000;
-
-    // 3
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-        "{%0, %1, %2, %3}, [%4];"
-        : "=r"(reg_[0][3][0]), "=r"(reg_[0][3][1]), "=r"(reg_[1][3][0]), "=r"(reg_[1][3][1])
-        : "r"(src_addr)
-    );
-    // if (thread0()) {
-    //     printf("3: %f\n", (float) reg[0][3][0]);
-    // }
-
-    src_addr ^= 0b100000110000;
+__constant__ unsigned int increment_xor_patterns_A[2] = {0b10000, 0b110000};
 
 
-    // 0
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][0][0]), "=r"(reg_[2][0][1]), "=r"(reg_[3][0][0]), "=r"(reg_[3][0][1])
-      : "r"(src_addr)
-    );
-    // if (thread0()) {
-    //     printf("0: %f\n", (float) reg[2][0][0]);
-    // }
-    src_addr ^= 0b10000;
-    
-    // 1
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-        "{%0, %1, %2, %3}, [%4];"
-        : "=r"(reg_[2][1][0]), "=r"(reg_[2][1][1]), "=r"(reg_[3][1][0]), "=r"(reg_[3][1][1])
-        : "r"(src_addr)
-    );
-    // if (thread0()) {
-    //     printf("1: %f\n", (float) reg[2][1][0]);
-    // }
+template <unsigned int _A_smem_stride_elements>
+struct WarpTileIteratorA {
+  half* _ptr;
+  unsigned int _offset;
+  unsigned int _count;
 
-    src_addr ^= 0b110000;
+  __device__ __forceinline__ WarpTileIteratorA(half* ptr) : _ptr(ptr), _offset(0), _count(0) {
+    _offset = (threadIdx.x % 32) * _A_smem_stride_elements; // logical offset
+    _offset = _offset ^ ((_offset & 0b10000000) >> 4); // apply swizzle 1
+    _offset = _offset ^ ((_offset & 0b1100000) >> 2);  // apply swizzle 2
+    _offset = cvta_to_shared_u32(_ptr + _offset); // convert to shmem address
+  }
 
-    // 2
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-        "{%0, %1, %2, %3}, [%4];"
-        : "=r"(reg_[2][2][0]), "=r"(reg_[2][2][1]), "=r"(reg_[3][2][0]), "=r"(reg_[3][2][1])
-        : "r"(src_addr)
-    );
-    // if (thread0()) {
-    //     printf("2: %f\n", (float) reg[2][2][0]);
-    // }
+  __device__ __forceinline__ uint32_t operator()(const unsigned int index) const {
+    return _offset + index * _A_smem_stride_elements;
+  }
 
-    src_addr ^= 0b10000;
-
-    // 3
-    asm volatile (
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-        "{%0, %1, %2, %3}, [%4];"
-        : "=r"(reg_[2][3][0]), "=r"(reg_[2][3][1]), "=r"(reg_[3][3][0]), "=r"(reg_[3][3][1])
-        : "r"(src_addr)
-    );
-    // if (thread0()) {
-    //     printf("3: %f\n", (float) reg[2][3][0]);
-    // }
-
-}
-
+  __device__ __forceinline__ void operator++() {
+    _offset ^= increment_xor_patterns_A[_count % 2];
+    _count++;
+  }
+};
 
 
 
@@ -161,7 +64,7 @@ kernel_10(half* A,
   constexpr unsigned int mma_tiles_per_warp_m = WM_dim / MMA_M_dim;
   constexpr unsigned int mma_tiles_per_warp_n = WN_dim / MMA_N_dim;
   constexpr unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
-  const unsigned int num_block_tiles_k = K / BK_dim;
+  const unsigned int block_tiles_k = K / BK_dim;
   
   // const unsigned int blocks_per_M = M / BM_dim;
   const unsigned int blocks_per_N = N / BN_dim;
@@ -229,8 +132,27 @@ kernel_10(half* A,
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
+
+
+  WarpTileIteratorA<BK_dim> A_warp_tile_iter(A_smem_);
+
+
   // declare register storage for accumulators
   half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  
+  // A/B accumulators hold two k slices for overlap of data transfer and compute
+  // each iteration of the inner loop one slice is being used for compute
+  // while the next slice (mod 2) is being written to
+  half A_mma_tile_reg[2][mma_tiles_per_warp_k][4];
+  half B_mma_tile_reg[mma_tiles_per_warp_k][2][2];
+
+  uint32_t(& A_mma_tile_reg_)[2][mma_tiles_per_warp_k][2] = reinterpret_cast<uint32_t(&)[2][mma_tiles_per_warp_k][2]>(A_mma_tile_reg);
+
+
+
+  float4 A_gmem_cache_reg[4];
+  float4 B_gmem_cache_reg[2];
+  
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
@@ -242,123 +164,46 @@ kernel_10(half* A,
       }
   }
 
+  // copy 0th block tile from gmem -> smem
   Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, 0));
   Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(0, block_n));
   tileMemcpySwizzleUnrolled_A<BM_dim, BK_dim>(A_block_tile.data(), A_smem_, K);
   tileMemcpySwizzleUnrolled_B<BK_dim, BN_dim>(B_block_tile.data(), B_smem_, N);
-  
 
-  half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-  half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
-  float4 A_gmem_cache_reg[4];
-  float4 B_gmem_cache_reg[2];
+  // copy 0th warp tile from smem -> register
+
   // static_assert(BM_dim == 256, "BM_dim must be 256");
-  for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
+  for (unsigned int block_k = 1; block_k <= block_tiles_k; block_k++)
   {
-
-
-    if (block_k != num_block_tiles_k)
-    {
-      Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
-      Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-      // copy tile of A from global memory to registers
-      // we want these memory requests to be in flight while the mmas are being computed
-      {
-        constexpr unsigned int float4_cols = BK_dim / 8; // 8
-        Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(A_block_tile.data()), make_shape(BM_dim, float4_cols), make_stride(K / 8, 1));
-        unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-        const unsigned int thread_idx_y = thread_idx / float4_cols;
-        const unsigned int thread_idx_x = thread_idx % float4_cols;
-
-        A_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-        A_gmem_cache_reg[1] = src_float4(thread_idx_y + 32, thread_idx_x);
-        A_gmem_cache_reg[2] = src_float4(thread_idx_y + 64, thread_idx_x);
-        A_gmem_cache_reg[3] = src_float4(thread_idx_y + 96, thread_idx_x);
-        // A_gmem_cache_reg[4] = src_float4(thread_idx_y + 128, thread_idx_x);
-        // A_gmem_cache_reg[5] = src_float4(thread_idx_y + 160, thread_idx_x);
-        // A_gmem_cache_reg[6] = src_float4(thread_idx_y + 192, thread_idx_x);
-        // A_gmem_cache_reg[7] = src_float4(thread_idx_y + 224, thread_idx_x);
-      }
-
-      // copy tile of B from global memory to registers
-      {
-        constexpr unsigned int float4_cols = BN_dim / 8; // 16
-        Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(B_block_tile.data()), make_shape(BK_dim, float4_cols), make_stride(N / 8, 1));
-        unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-        const unsigned int thread_idx_y = thread_idx / float4_cols;
-        const unsigned int thread_idx_x = thread_idx % float4_cols;
-        B_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-        B_gmem_cache_reg[1] = src_float4(thread_idx_y + 16, thread_idx_x);
-        // B_gmem_cache_reg[2] = src_float4(thread_idx_y + 32, thread_idx_x);
-        // B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
-      }
-    }
- 
-    ldmatrix_a_
-    <mma_tiles_per_warp_m, mma_tiles_per_warp_k>
-    (
-      A_smem_ + (warp_m * WM_dim) * BK_dim,
-      A_mma_tile_reg,
-      BK_dim
-    );
-    ldmatrix_b(
-      B_smem_ + (warp_n * WN_dim),
-      B_mma_tile_reg,
-      BN_dim,
-      alpha
-    );
-
-
-    // outer product between tiles of a and b
-    #pragma unroll
     for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
     {
-      #pragma unroll
-      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      if (block_k == 1 && thread0())
       {
-        #pragma unroll
-        for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-        {
-          mma_sync_m16n8k8(
-            acc_register[mma_m][mma_n],
-            A_mma_tile_reg[mma_m][mma_k],
-            B_mma_tile_reg[mma_k][mma_n],
-            acc_register[mma_m][mma_n]
-          );
-        }
+        asm volatile (
+          "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+          "{%0, %1, %2, %3}, [%4];"
+          : "=r"(A_mma_tile_reg_[0][0][0]), "=r"(A_mma_tile_reg_[0][0][1]), "=r"(A_mma_tile_reg_[1][0][0]), "=r"(A_mma_tile_reg_[1][0][1])
+          : "r"(A_warp_tile_iter(0))
+        );
+        printf("%d, %d: %f\n", mma_k, A_warp_tile_iter(0), (float) A_mma_tile_reg_[0][0][0]);
+        ++A_warp_tile_iter;
       }
+
+
+      // if (mma_k == mma_tiles_per_warp_k - 1)
+      // {
+      //   // write register -> smem
+      // }
+
+      // // load next mma k slice
+
+      // if (mma_k == 0)
+      // {
+      //   // load gmem -> register
+      // }
+
+      // // compute current mma k slice
     }
-    __syncthreads();
-
-    {
-      float4* A_smem_float4 = reinterpret_cast<float4*>(A_smem_);
-      int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-      constexpr unsigned int iterations = BM_dim * (BK_dim / 8) / num_threads;
-      
-      #pragma unroll
-      for (int i = 0; i < iterations; i++)
-      {
-        unsigned int dst_ind = thread_idx ^ ((thread_idx & 0b10000) >> 4);
-        dst_ind = dst_ind ^ ((dst_ind & 0b1100) >> 2);
-        A_smem_float4[dst_ind] = A_gmem_cache_reg[i];
-        thread_idx += num_threads;
-      }
-    }
-
-    {
-      float4* B_smem_float4 = reinterpret_cast<float4*>(B_smem_);
-      int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-      constexpr unsigned int iterations = BK_dim * (BN_dim / 8) / num_threads;
-
-      #pragma unroll
-      for (int i = 0; i < iterations; i++)
-      {
-        const unsigned int dst_ind = thread_idx ^ ((thread_idx & 0b1110000) >> 4);
-        B_smem_float4[dst_ind] = B_gmem_cache_reg[i];
-        thread_idx += num_threads;
-      }
-    }
-
   }
 
   half alpha_ = (half)alpha;
