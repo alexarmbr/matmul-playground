@@ -379,6 +379,11 @@ kernel_8(half* A,
       );
     }
 
+    if (thread0())
+    {
+      printf("%d: current: %f, prev: %f\n", mma_k, (float) B_mma_tile_reg[mma_k][0][0], (float) B_mma_tile_reg[mma_k-1][0][0]);
+    }
+
       #pragma unroll
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
