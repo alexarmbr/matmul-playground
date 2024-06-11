@@ -71,9 +71,10 @@ kernel_10(half* A,
   auto B_mma_tile_shape = make_shape(Int<MMA_K_dim>{}, Int<MMA_N_dim>{});
   auto CD_mma_tile_shape = make_shape(Int<MMA_M_dim>{}, Int<MMA_N_dim>{});
 
+  // double buffering
   extern __shared__ half shmem[];
-  half* A_smem_ = shmem;
-  half* B_smem_ = &shmem[BM_dim * BK_dim];
+  half* A_smem_[2] = {shmem, &shmem[BM_dim * BK_dim]};
+  half* B_smem_[2] = {&shmem[2 * BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
 
   Tensor A_gmem = make_tensor(A, make_shape(M, K), LayoutRight{});
   Tensor B_gmem = make_tensor(B, make_shape(K, N), LayoutRight{});
@@ -120,19 +121,15 @@ kernel_10(half* A,
   float4 B_gmem_cache_reg[2];
 
   // set up pointers into shared memory tile for A
-  // const half* A_smem_warp_tile_ = A_smem_ + (warp_m * WM_dim) * BK_dim;
-  const uint32_t A_smem_warp_tile_ = cvta_to_shared_u32(A_smem_ + (warp_m * WM_dim) * BK_dim);
+  const uint32_t A_smem_warp_tile_[2] = {cvta_to_shared_u32(A_smem_[0] + (warp_m * WM_dim) * BK_dim), cvta_to_shared_u32(A_smem_[1] + (warp_m * WM_dim) * BK_dim)};
   uint32_t A_offset_1 = (threadIdx.x % 32) * BK_dim;
   uint32_t A_offset_2 = ((threadIdx.x % 32) + 32) * BK_dim;
   A_offset_1 = A_offset_1 ^ ((A_offset_1 & 0b10000000) >> 4);
   A_offset_2 = A_offset_2 ^ ((A_offset_2 & 0b10000000) >> 4);
   A_offset_1 = A_offset_1 ^ ((A_offset_1 & 0b1100000) >> 2);
   A_offset_2 = A_offset_2 ^ ((A_offset_2 & 0b1100000) >> 2);
-  // A_offset_1 = cvta_to_shared_u32(A_smem_warp_tile_ + A_offset_1);
-  // A_offset_2 = cvta_to_shared_u32(A_smem_warp_tile_ + A_offset_2);
   A_offset_1 <<= 1; // convert from half offset to byte offset
   A_offset_2 <<= 1;
-
   static constexpr int A_increment_xor_patterns[4] = {
     0b10000,
     0b110000,
@@ -141,8 +138,7 @@ kernel_10(half* A,
   };
 
   // set up pointers into shared memory tile for B
-  // const half* B_smem_warp_tile_ = B_smem_ + (warp_n * WN_dim);
-  const uint32_t B_smem_warp_tile_ = cvta_to_shared_u32(B_smem_ + (warp_n * WN_dim));
+  const uint32_t B_smem_warp_tile_[2] = {cvta_to_shared_u32(B_smem_[0] + (warp_n * WN_dim)), cvta_to_shared_u32(B_smem_[1] + (warp_n * WN_dim))};
   const unsigned int thread_group = (threadIdx.x % 32) / 8;
   const unsigned int thread_row = threadIdx.x % 8;
   const unsigned int B_logical_offset = (thread_row * BN_dim) + (thread_group * 8);
@@ -166,8 +162,8 @@ kernel_10(half* A,
   // copy 0th block tile from gmem -> smem
   Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, 0));
   Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(0, block_n));
-  tileMemcpySwizzleUnrolled_A<BM_dim, BK_dim>(A_block_tile.data(), A_smem_, K);
-  tileMemcpySwizzleUnrolled_B<BK_dim, BN_dim>(B_block_tile.data(), B_smem_, N);
+  tileMemcpySwizzleUnrolled_A<BM_dim, BK_dim>(A_block_tile.data(), A_smem_[0], K);
+  tileMemcpySwizzleUnrolled_B<BK_dim, BN_dim>(B_block_tile.data(), B_smem_[0], N);
   __syncthreads();
 
   // copy 0th k slice of A from smem -> register
@@ -175,14 +171,14 @@ kernel_10(half* A,
     "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
     "{%0, %1, %2, %3}, [%4];"
     : "=r"(A_mma_tile_reg_[0][0][0]), "=r"(A_mma_tile_reg_[0][0][1]), "=r"(A_mma_tile_reg_[1][0][0]), "=r"(A_mma_tile_reg_[1][0][1])
-    : "r"(A_offset_1)
+    : "r"(A_smem_warp_tile_[0] + A_offset_1)
   );
 
   asm volatile (
     "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
     "{%0, %1, %2, %3}, [%4];"
     : "=r"(A_mma_tile_reg_[2][0][0]), "=r"(A_mma_tile_reg_[2][0][1]), "=r"(A_mma_tile_reg_[3][0][0]), "=r"(A_mma_tile_reg_[3][0][1])
-    : "r"(A_offset_2)
+    : "r"(A_smem_warp_tile_[0] + A_offset_2)
   );
 
   // advance offsets
@@ -195,24 +191,28 @@ kernel_10(half* A,
     "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
     "{%0, %1, %2, %3}, [%4];"
     : "=r"(B_mma_tile_reg_[0][0]), "=r"(B_mma_tile_reg_[0][1]), "=r"(B_mma_tile_reg_[0][2]), "=r"(B_mma_tile_reg_[0][3])
-    : "r"(B_smem_warp_tile_ + B_offset_1)
+    : "r"(B_smem_warp_tile_[0] + B_offset_1)
   );
   asm volatile (
     "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
     "{%0, %1, %2, %3}, [%4];"
     : "=r"(B_mma_tile_reg_[0][7]), "=r"(B_mma_tile_reg_[0][6]), "=r"(B_mma_tile_reg_[0][5]), "=r"(B_mma_tile_reg_[0][4])
-    : "r"(B_smem_warp_tile_ + B_offset_2)
+    : "r"(B_smem_warp_tile_[0] + B_offset_2)
   );
 
   // static_assert(BM_dim == 256, "BM_dim must be 256");
+  unsigned int smem_buffer_ind = 0;
   for (unsigned int block_k = 1; block_k <= block_tiles_k; block_k++)
   {
+    #pragma unroll
     for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
     {
-      if (mma_k == mma_tiles_per_warp_k - 1)
+      if (mma_k == mma_tiles_per_warp_k - 1 && block_k != block_tiles_k)
       {
+
+        // copy from register cache -> smem
         {
-          float4* A_smem_float4 = reinterpret_cast<float4*>(A_smem_);
+          float4* A_smem_float4 = reinterpret_cast<float4*>(A_smem_[block_k % 2]);
           int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
           constexpr unsigned int iterations = BM_dim * (BK_dim / 8) / num_threads;
           
@@ -227,7 +227,7 @@ kernel_10(half* A,
         }
     
         {
-          float4* B_smem_float4 = reinterpret_cast<float4*>(B_smem_);
+          float4* B_smem_float4 = reinterpret_cast<float4*>(B_smem_[block_k % 2]);
           int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
           constexpr unsigned int iterations = BK_dim * (BN_dim / 8) / num_threads;
     
@@ -242,43 +242,50 @@ kernel_10(half* A,
         __syncthreads();
       }
 
+      // copy next k slice of B from smem -> register
+      const unsigned int mma_row = (mma_k + 1) % 4;
+      if (mma_row == 0)
+      {
+        smem_buffer_ind = 1 - smem_buffer_ind;
+      }
+
       // load next k slice of A from smem -> register
-      const unsigned int load_iter  = (mma_k + 1) % 2;
+      const unsigned int register_load_iter  = (mma_k + 1) % 2;
       asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
-        : "=r"(A_mma_tile_reg_[0][load_iter][0]), "=r"(A_mma_tile_reg_[0][load_iter][1]), "=r"(A_mma_tile_reg_[1][load_iter][0]), "=r"(A_mma_tile_reg_[1][load_iter][1])
-        : "r"(A_smem_warp_tile_ + A_offset_1)
+        : "=r"(A_mma_tile_reg_[0][register_load_iter][0]), "=r"(A_mma_tile_reg_[0][register_load_iter][1]), "=r"(A_mma_tile_reg_[1][register_load_iter][0]), "=r"(A_mma_tile_reg_[1][register_load_iter][1])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_1)
       );
     
       asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
-        : "=r"(A_mma_tile_reg_[2][load_iter][0]), "=r"(A_mma_tile_reg_[2][load_iter][1]), "=r"(A_mma_tile_reg_[3][load_iter][0]), "=r"(A_mma_tile_reg_[3][load_iter][1])
-        : "r"(A_smem_warp_tile_ + A_offset_1)
+        : "=r"(A_mma_tile_reg_[2][register_load_iter][0]), "=r"(A_mma_tile_reg_[2][register_load_iter][1]), "=r"(A_mma_tile_reg_[3][register_load_iter][0]), "=r"(A_mma_tile_reg_[3][register_load_iter][1])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_1)
       );
       A_offset_1 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
       A_offset_2 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
 
-      // copy next k slice of B from smem -> register
-      const unsigned int mma_row = (mma_k + 1) % 4;
+
       asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
-        : "=r"(B_mma_tile_reg_[load_iter][0]), "=r"(B_mma_tile_reg_[load_iter][1]), "=r"(B_mma_tile_reg_[load_iter][2]), "=r"(B_mma_tile_reg_[load_iter][3])
-        : "r"(B_smem_warp_tile_ + (B_offset_1 + (mma_row * row_offset)))
+        : "=r"(B_mma_tile_reg_[register_load_iter][0]), "=r"(B_mma_tile_reg_[register_load_iter][1]), "=r"(B_mma_tile_reg_[register_load_iter][2]), "=r"(B_mma_tile_reg_[register_load_iter][3])
+        : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_1 + (mma_row * row_offset)))
       );
       asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
-        : "=r"(B_mma_tile_reg_[load_iter][7]), "=r"(B_mma_tile_reg_[load_iter][6]), "=r"(B_mma_tile_reg_[load_iter][5]), "=r"(B_mma_tile_reg_[load_iter][4])
-        : "r"(B_smem_warp_tile_ + (B_offset_2 + (mma_row * row_offset)))
+        : "=r"(B_mma_tile_reg_[register_load_iter][7]), "=r"(B_mma_tile_reg_[register_load_iter][6]), "=r"(B_mma_tile_reg_[register_load_iter][5]), "=r"(B_mma_tile_reg_[register_load_iter][4])
+        : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_2 + (mma_row * row_offset)))
       );
 
-    if (thread0())
-    {
-      printf("%d: current: %f, prev: %f\n", mma_row, (float) B_mma_tile_reg[load_iter][0][0], (float) B_mma_tile_reg[1-load_iter][0][0]);
-    }
+    // if (thread0())
+    // {
+    //   // printf("%d: current: %f, prev: %f\n", mma_row, (float) B_mma_tile_reg[register_load_iter][0][0], (float) B_mma_tile_reg[1-register_load_iter][0][0]);
+    //   printf("%d: current: %f, prev: %f\n", mma_row, (float) A_mma_tile_reg[0][register_load_iter][0], (float) B_mma_tile_reg[0][1-register_load_iter][0]);
+    // }
     if (mma_k == 0 && block_k != block_tiles_k)
     {
         Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
@@ -315,9 +322,25 @@ kernel_10(half* A,
           // B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
         }
     }
+
+
+    const unsigned int register_compute_iter = 1 - register_load_iter;
+    #pragma unroll
+    for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+    {
+      #pragma unroll
+      for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+      {
+        mma_sync_m16n8k8(
+          acc_register[mma_m][mma_n],
+          A_mma_tile_reg[mma_m][register_compute_iter],
+          B_mma_tile_reg[register_compute_iter][mma_n],
+          acc_register[mma_m][mma_n]
+        );
+      }
     }
-      // compute current mma k slice
-  
+  }
+
   }
 
 
@@ -377,7 +400,7 @@ void kernel_10_launch(sgemm_params device_sgemm_params, KernelLogger& timer, con
     constexpr unsigned int ThreadsM = WARPS_PER_BLOCK_M;
     constexpr unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
     constexpr unsigned int num_threads = ThreadsM * ThreadsN;
-    constexpr unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+    constexpr unsigned int shmem_bytes = 2 * (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
     // constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
     // constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
 
