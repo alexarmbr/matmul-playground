@@ -41,7 +41,7 @@ kernel_10(half* A,
   
   // const unsigned int blocks_per_M = M / BM_dim;
   const unsigned int blocks_per_N = N / BN_dim;
-  // auto swizzle_tile_dim = Int<4>{};
+  // auto swizzle_tile_dim = Int<8>{};
   // const int block_swizzle_tiles_per_M = blocks_per_M / swizzle_tile_dim;
   // const int block_swizzle_tiles_per_N = blocks_per_N / swizzle_tile_dim;
   // Layout block_n_map = make_layout(
