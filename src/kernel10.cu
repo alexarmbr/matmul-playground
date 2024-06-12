@@ -255,14 +255,14 @@ kernel_10(half* A,
         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
         : "=r"(A_mma_tile_reg_[0][register_load_iter][0]), "=r"(A_mma_tile_reg_[0][register_load_iter][1]), "=r"(A_mma_tile_reg_[1][register_load_iter][0]), "=r"(A_mma_tile_reg_[1][register_load_iter][1])
-        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_1)
+        : "r"(A_smem_warp_tile_[0])
       );
     
       asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
         : "=r"(A_mma_tile_reg_[2][register_load_iter][0]), "=r"(A_mma_tile_reg_[2][register_load_iter][1]), "=r"(A_mma_tile_reg_[3][register_load_iter][0]), "=r"(A_mma_tile_reg_[3][register_load_iter][1])
-        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_2)
+        : "r"(A_smem_warp_tile_[0])
       );
       A_offset_1 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
       A_offset_2 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
