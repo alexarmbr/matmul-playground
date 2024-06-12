@@ -17,7 +17,7 @@ unsigned int WN_dim,
 unsigned int WK_dim,
 unsigned int num_threads>
 __global__ void
-kernel_10(half* A,
+kernel_11(half* A,
   half* B,
   half* C,
   half* D,
@@ -116,6 +116,7 @@ kernel_10(half* A,
   half B_mma_tile_reg[2][mma_tiles_per_warp_n][2];
   uint32_t (&A_mma_tile_reg_) [mma_tiles_per_warp_m][2][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][2][2]>(A_mma_tile_reg);
   uint32_t (&B_mma_tile_reg_) [2][mma_tiles_per_warp_n] = reinterpret_cast<uint32_t(&)[2][mma_tiles_per_warp_n]>(B_mma_tile_reg);
+  uint32_t (&acc_register_) [mma_tiles_per_warp_m][mma_tiles_per_warp_n][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2]>(acc_register);
 
   float4 A_gmem_cache_reg[4];
   float4 B_gmem_cache_reg[2];
@@ -130,12 +131,13 @@ kernel_10(half* A,
   A_offset_2 = A_offset_2 ^ ((A_offset_2 & 0b1100000) >> 2);
   A_offset_1 <<= 1; // convert from half offset to byte offset
   A_offset_2 <<= 1;
-  const int A_increment_xor_patterns[4] = {
-    0b10000,
-    0b110000,
-    0b10000,
-    0b110000
-  };
+  
+  // const int A_increment_xor_patterns[4] = {
+  //   0b10000,
+  //   0b110000,
+  //   0b10000,
+  //   0b110000
+  // };
 
   // set up pointers into shared memory tile for B
   const uint32_t B_smem_warp_tile_[2] = {cvta_to_shared_u32(B_smem_[0] + (warp_n * WN_dim)), cvta_to_shared_u32(B_smem_[1] + (warp_n * WN_dim))};
@@ -182,8 +184,8 @@ kernel_10(half* A,
   );
 
   // advance offsets
-  A_offset_1 ^= A_increment_xor_patterns[0];
-  A_offset_2 ^= A_increment_xor_patterns[0];
+  A_offset_1 ^= 0b10000;
+  A_offset_2 ^= 0b10000;
 
 
   // copy 0th k slice of B from smem -> register
@@ -209,13 +211,215 @@ kernel_10(half* A,
   // static_assert(BM_dim == 256, "BM_dim must be 256");
   unsigned int smem_buffer_ind = 0;
   for (unsigned int block_k = 1; block_k <= block_tiles_k; block_k++)
-  {
-    #pragma unroll
-    for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+  {      
+
+      /////////////////
+      // ITERATION 0 //
+      /////////////////
+      unsigned int register_load_iter = 1;
+      unsigned int register_compute_iter = 0;
+      unsigned int mma_row = 1;
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(A_mma_tile_reg_[0][register_load_iter][0]), "=r"(A_mma_tile_reg_[0][register_load_iter][1]), "=r"(A_mma_tile_reg_[1][register_load_iter][0]), "=r"(A_mma_tile_reg_[1][register_load_iter][1])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_1)
+      );
+    
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(A_mma_tile_reg_[2][register_load_iter][0]), "=r"(A_mma_tile_reg_[2][register_load_iter][1]), "=r"(A_mma_tile_reg_[3][register_load_iter][0]), "=r"(A_mma_tile_reg_[3][register_load_iter][1])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_2)
+      );
+      A_offset_1 ^= 0b110000;
+      A_offset_2 ^= 0b110000;
+
+
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(B_mma_tile_reg_[register_load_iter][0]), "=r"(B_mma_tile_reg_[register_load_iter][1]), "=r"(B_mma_tile_reg_[register_load_iter][2]), "=r"(B_mma_tile_reg_[register_load_iter][3])
+        : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_1 + (mma_row * row_offset)))
+      );
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(B_mma_tile_reg_[register_load_iter][7]), "=r"(B_mma_tile_reg_[register_load_iter][6]), "=r"(B_mma_tile_reg_[register_load_iter][5]), "=r"(B_mma_tile_reg_[register_load_iter][4])
+        : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_2 + (mma_row * row_offset)))
+      );
+
+    // if (thread0())
+    // {
+    //   printf("%d: current: %f, prev: %f\n", mma_row, (float) B_mma_tile_reg[register_load_iter][0][0], (float) B_mma_tile_reg[1-register_load_iter][0][0]);
+    //   // printf("%d: current: %f, prev: %f\n", mma_row, (float) A_mma_tile_reg[0][register_load_iter][0], (float) A_mma_tile_reg[0][1-register_load_iter][0]);
+    // }
+
+    if (block_k != block_tiles_k)
     {
+        Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
+        Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
+        // copy tile of A from global memory to registers
+        // we want these memory requests to be in flight while the mmas are being computed
+        {
+          constexpr unsigned int float4_cols = BK_dim / 8; // 8
+          Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(A_block_tile.data()), make_shape(BM_dim, float4_cols), make_stride(K / 8, 1));
+          unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+          const unsigned int thread_idx_y = thread_idx / float4_cols;
+          const unsigned int thread_idx_x = thread_idx % float4_cols;
+  
+          A_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
+          A_gmem_cache_reg[1] = src_float4(thread_idx_y + 32, thread_idx_x);
+          A_gmem_cache_reg[2] = src_float4(thread_idx_y + 64, thread_idx_x);
+          A_gmem_cache_reg[3] = src_float4(thread_idx_y + 96, thread_idx_x);
+        }
+  
+        // copy tile of B from global memory to registers
+        {
+          constexpr unsigned int float4_cols = BN_dim / 8; // 16
+          Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(B_block_tile.data()), make_shape(BK_dim, float4_cols), make_stride(N / 8, 1));
+          unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+          const unsigned int thread_idx_y = thread_idx / float4_cols;
+          const unsigned int thread_idx_x = thread_idx % float4_cols;
+          B_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
+          B_gmem_cache_reg[1] = src_float4(thread_idx_y + 16, thread_idx_x);
+        }
+    }
+
+    #pragma unroll
+    for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+    {
+      #pragma unroll
+      for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+      {
+        asm volatile (
+          "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+          "{%0, %1}, "
+          "{%2, %3}, "
+          "{%4}, "
+          "{%5, %6};"
+          : "=r"(acc_register_[mma_m][mma_n][0]), "=r"(acc_register_[mma_m][mma_n][1])
+          : "r"(A_mma_tile_reg_[mma_m][register_compute_iter][0]), "r"(A_mma_tile_reg_[mma_m][register_compute_iter][1]),
+            "r"(B_mma_tile_reg_[register_compute_iter][mma_n]),
+            "r"(acc_register_[mma_m][mma_n][0]), "r"(acc_register_[mma_m][mma_n][1])
+        );
+      }
+    }
+
+      /////////////////
+      // ITERATION 1 //
+      /////////////////
+      register_load_iter = 0;
+      register_compute_iter = 1;
+      mma_row = 2;
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(A_mma_tile_reg_[0][register_load_iter][0]), "=r"(A_mma_tile_reg_[0][register_load_iter][1]), "=r"(A_mma_tile_reg_[1][register_load_iter][0]), "=r"(A_mma_tile_reg_[1][register_load_iter][1])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_1)
+      );
+    
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(A_mma_tile_reg_[2][register_load_iter][0]), "=r"(A_mma_tile_reg_[2][register_load_iter][1]), "=r"(A_mma_tile_reg_[3][register_load_iter][0]), "=r"(A_mma_tile_reg_[3][register_load_iter][1])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_2)
+      );
+      A_offset_1 ^= 0b10000;
+      A_offset_2 ^= 0b10000;
+
+
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(B_mma_tile_reg_[register_load_iter][0]), "=r"(B_mma_tile_reg_[register_load_iter][1]), "=r"(B_mma_tile_reg_[register_load_iter][2]), "=r"(B_mma_tile_reg_[register_load_iter][3])
+        : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_1 + (mma_row * row_offset)))
+      );
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(B_mma_tile_reg_[register_load_iter][7]), "=r"(B_mma_tile_reg_[register_load_iter][6]), "=r"(B_mma_tile_reg_[register_load_iter][5]), "=r"(B_mma_tile_reg_[register_load_iter][4])
+        : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_2 + (mma_row * row_offset)))
+      );
+
+      #pragma unroll
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      {
+        #pragma unroll
+        for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+        {
+          asm volatile (
+            "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+            "{%0, %1}, "
+            "{%2, %3}, "
+            "{%4}, "
+            "{%5, %6};"
+            : "=r"(acc_register_[mma_m][mma_n][0]), "=r"(acc_register_[mma_m][mma_n][1])
+            : "r"(A_mma_tile_reg_[mma_m][register_compute_iter][0]), "r"(A_mma_tile_reg_[mma_m][register_compute_iter][1]),
+              "r"(B_mma_tile_reg_[register_compute_iter][mma_n]),
+              "r"(acc_register_[mma_m][mma_n][0]), "r"(acc_register_[mma_m][mma_n][1])
+          );
+        }
+      }
+
+
+      /////////////////
+      // ITERATION 2 //
+      /////////////////
+      register_load_iter = 1;
+      register_compute_iter = 0;
+      mma_row = 3;
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(A_mma_tile_reg_[0][register_load_iter][0]), "=r"(A_mma_tile_reg_[0][register_load_iter][1]), "=r"(A_mma_tile_reg_[1][register_load_iter][0]), "=r"(A_mma_tile_reg_[1][register_load_iter][1])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_1)
+      );
+    
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(A_mma_tile_reg_[2][register_load_iter][0]), "=r"(A_mma_tile_reg_[2][register_load_iter][1]), "=r"(A_mma_tile_reg_[3][register_load_iter][0]), "=r"(A_mma_tile_reg_[3][register_load_iter][1])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_2)
+      );
+      A_offset_1 ^= 0b110000;
+      A_offset_2 ^= 0b110000;
+
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(B_mma_tile_reg_[register_load_iter][0]), "=r"(B_mma_tile_reg_[register_load_iter][1]), "=r"(B_mma_tile_reg_[register_load_iter][2]), "=r"(B_mma_tile_reg_[register_load_iter][3])
+        : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_1 + (mma_row * row_offset)))
+      );
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(B_mma_tile_reg_[register_load_iter][7]), "=r"(B_mma_tile_reg_[register_load_iter][6]), "=r"(B_mma_tile_reg_[register_load_iter][5]), "=r"(B_mma_tile_reg_[register_load_iter][4])
+        : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_2 + (mma_row * row_offset)))
+      );
+
+      #pragma unroll
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      {
+        #pragma unroll
+        for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+        {
+          asm volatile (
+            "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+            "{%0, %1}, "
+            "{%2, %3}, "
+            "{%4}, "
+            "{%5, %6};"
+            : "=r"(acc_register_[mma_m][mma_n][0]), "=r"(acc_register_[mma_m][mma_n][1])
+            : "r"(A_mma_tile_reg_[mma_m][register_compute_iter][0]), "r"(A_mma_tile_reg_[mma_m][register_compute_iter][1]),
+              "r"(B_mma_tile_reg_[register_compute_iter][mma_n]),
+              "r"(acc_register_[mma_m][mma_n][0]), "r"(acc_register_[mma_m][mma_n][1])
+          );
+        }
+      }
 
       // if this is the last k slice, write the next warp tile to smem
-      if (mma_k == mma_tiles_per_warp_k - 1 && block_k != block_tiles_k)
+      if (block_k != block_tiles_k)
       {
 
         // copy from register cache -> smem
@@ -249,16 +453,13 @@ kernel_10(half* A,
         }
         __syncthreads();
       }
-
-      // copy next k slice % 4 of B from smem -> register
-      const unsigned int mma_row = (mma_k + 1) % 4;
-      if (mma_row == 0)
-      {
-        smem_buffer_ind = 1 - smem_buffer_ind;
-      }
       
-      // load next k slice of A from smem -> register
-      const unsigned int register_load_iter  = (mma_k + 1) % 2;
+      /////////////////
+      // ITERATION 3 //
+      /////////////////
+      register_load_iter = 0;
+      register_compute_iter = 1;
+      mma_row = 0;
       asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
@@ -272,9 +473,8 @@ kernel_10(half* A,
         : "=r"(A_mma_tile_reg_[2][register_load_iter][0]), "=r"(A_mma_tile_reg_[2][register_load_iter][1]), "=r"(A_mma_tile_reg_[3][register_load_iter][0]), "=r"(A_mma_tile_reg_[3][register_load_iter][1])
         : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_2)
       );
-      A_offset_1 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
-      A_offset_2 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
-
+      A_offset_1 ^= 0b10000;
+      A_offset_2 ^= 0b10000;
 
       asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
@@ -289,66 +489,25 @@ kernel_10(half* A,
         : "r"(B_smem_warp_tile_[smem_buffer_ind] + (B_offset_2 + (mma_row * row_offset)))
       );
 
-    // if (thread0())
-    // {
-    //   printf("%d: current: %f, prev: %f\n", mma_row, (float) B_mma_tile_reg[register_load_iter][0][0], (float) B_mma_tile_reg[1-register_load_iter][0][0]);
-    //   // printf("%d: current: %f, prev: %f\n", mma_row, (float) A_mma_tile_reg[0][register_load_iter][0], (float) A_mma_tile_reg[0][1-register_load_iter][0]);
-    // }
-
-    if (mma_k == 0 && block_k != block_tiles_k)
-    {
-        Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
-        Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-        // copy tile of A from global memory to registers
-        // we want these memory requests to be in flight while the mmas are being computed
-        {
-          constexpr unsigned int float4_cols = BK_dim / 8; // 8
-          Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(A_block_tile.data()), make_shape(BM_dim, float4_cols), make_stride(K / 8, 1));
-          unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-          const unsigned int thread_idx_y = thread_idx / float4_cols;
-          const unsigned int thread_idx_x = thread_idx % float4_cols;
-  
-          A_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-          A_gmem_cache_reg[1] = src_float4(thread_idx_y + 32, thread_idx_x);
-          A_gmem_cache_reg[2] = src_float4(thread_idx_y + 64, thread_idx_x);
-          A_gmem_cache_reg[3] = src_float4(thread_idx_y + 96, thread_idx_x);
-          // A_gmem_cache_reg[4] = src_float4(thread_idx_y + 128, thread_idx_x);
-          // A_gmem_cache_reg[5] = src_float4(thread_idx_y + 160, thread_idx_x);
-          // A_gmem_cache_reg[6] = src_float4(thread_idx_y + 192, thread_idx_x);
-          // A_gmem_cache_reg[7] = src_float4(thread_idx_y + 224, thread_idx_x);
-        }
-  
-        // copy tile of B from global memory to registers
-        {
-          constexpr unsigned int float4_cols = BN_dim / 8; // 16
-          Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(B_block_tile.data()), make_shape(BK_dim, float4_cols), make_stride(N / 8, 1));
-          unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-          const unsigned int thread_idx_y = thread_idx / float4_cols;
-          const unsigned int thread_idx_x = thread_idx % float4_cols;
-          B_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-          B_gmem_cache_reg[1] = src_float4(thread_idx_y + 16, thread_idx_x);
-          // B_gmem_cache_reg[2] = src_float4(thread_idx_y + 32, thread_idx_x);
-          // B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
-        }
-    }
-
-
-    const unsigned int register_compute_iter = 1 - register_load_iter;
-    #pragma unroll
-    for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-    {
       #pragma unroll
-      for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        mma_sync_m16n8k8(
-          acc_register[mma_m][mma_n],
-          A_mma_tile_reg[mma_m][register_compute_iter],
-          B_mma_tile_reg[register_compute_iter][mma_n],
-          acc_register[mma_m][mma_n]
-        );
+        #pragma unroll
+        for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+        {
+          asm volatile (
+            "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+            "{%0, %1}, "
+            "{%2, %3}, "
+            "{%4}, "
+            "{%5, %6};"
+            : "=r"(acc_register_[mma_m][mma_n][0]), "=r"(acc_register_[mma_m][mma_n][1])
+            : "r"(A_mma_tile_reg_[mma_m][register_compute_iter][0]), "r"(A_mma_tile_reg_[mma_m][register_compute_iter][1]),
+              "r"(B_mma_tile_reg_[register_compute_iter][mma_n]),
+              "r"(acc_register_[mma_m][mma_n][0]), "r"(acc_register_[mma_m][mma_n][1])
+          );
+        }
       }
-    }
-  }
 
   }
 
@@ -380,7 +539,7 @@ kernel_10(half* A,
   }
 }
 
-void kernel_10_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void kernel_11_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
   constexpr unsigned int BM_dim = 256;
@@ -416,14 +575,14 @@ void kernel_10_launch(sgemm_params device_sgemm_params, KernelLogger& timer, con
     dim3 gridDim(BlocksN * BlocksM, 1);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_10<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, num_threads>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_11<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, num_threads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        kernel_10
+        kernel_11
         <BM_dim, BN_dim, BK_dim,
         WM_dim, WN_dim, WK_dim, num_threads>
         <<<gridDim, blockDim, shmem_bytes>>>(
