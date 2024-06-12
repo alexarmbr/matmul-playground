@@ -130,12 +130,12 @@ kernel_10(half* A,
   A_offset_2 = A_offset_2 ^ ((A_offset_2 & 0b1100000) >> 2);
   A_offset_1 <<= 1; // convert from half offset to byte offset
   A_offset_2 <<= 1;
-  static constexpr int A_increment_xor_patterns[4] = {
-    0b10000,
-    0b110000,
-    0b10000,
-    0b110000
-  };
+  // const int A_increment_xor_patterns[4] = {
+  //   0b10000,
+  //   0b110000,
+  //   0b10000,
+  //   0b110000
+  // };
 
   // set up pointers into shared memory tile for B
   const uint32_t B_smem_warp_tile_[2] = {cvta_to_shared_u32(B_smem_[0] + (warp_n * WN_dim)), cvta_to_shared_u32(B_smem_[1] + (warp_n * WN_dim))};
@@ -182,8 +182,10 @@ kernel_10(half* A,
   );
 
   // advance offsets
-  A_offset_1 ^= A_increment_xor_patterns[0];
-  A_offset_2 ^= A_increment_xor_patterns[1];
+  // A_offset_1 ^= A_increment_xor_patterns[0];
+  // A_offset_2 ^= A_increment_xor_patterns[1];
+  A_offset_1 ^= 0b10000;
+  A_offset_2 ^= 0b10000;
 
 
   // copy 0th k slice of B from smem -> register
@@ -255,17 +257,27 @@ kernel_10(half* A,
         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
         : "=r"(A_mma_tile_reg_[0][register_load_iter][0]), "=r"(A_mma_tile_reg_[0][register_load_iter][1]), "=r"(A_mma_tile_reg_[1][register_load_iter][0]), "=r"(A_mma_tile_reg_[1][register_load_iter][1])
-        : "r"(A_smem_warp_tile_[0])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_1)
       );
     
       asm volatile (
         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
         "{%0, %1, %2, %3}, [%4];"
         : "=r"(A_mma_tile_reg_[2][register_load_iter][0]), "=r"(A_mma_tile_reg_[2][register_load_iter][1]), "=r"(A_mma_tile_reg_[3][register_load_iter][0]), "=r"(A_mma_tile_reg_[3][register_load_iter][1])
-        : "r"(A_smem_warp_tile_[0])
+        : "r"(A_smem_warp_tile_[smem_buffer_ind] + A_offset_2)
       );
-      A_offset_1 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
-      A_offset_2 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
+      // A_offset_1 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
+      // A_offset_2 ^= A_increment_xor_patterns[(mma_k + 1) % 4];
+      if (mma_k % 2 == 0)
+      {
+        A_offset_1 ^= 0b110000;
+        A_offset_2 ^= 0b110000;
+      }
+      else
+      {
+        A_offset_1 ^= 0b10000;
+        A_offset_2 ^= 0b10000;
+      }
 
 
       asm volatile (
