@@ -14,9 +14,8 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 75)
 endif()
 
-# file(GLOB SOURCES "src/kernel*.cu")
-# file(GLOB SOURCES "src/kernel7.cu")
-list(APPEND SOURCES "src/kernel11.cu")
+file(GLOB SOURCES "src/kernel*.cu")
+# list(APPEND SOURCES "src/kernel11.cu")
 
 add_library(kernels ${SOURCES})
 # add_library(kernels src/kernel9.cu src/kernel10.cu)
@@ -24,7 +23,6 @@ target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
 
 # target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
-# target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:–Xptxas –dlcm=cg>)
 
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)

@@ -511,8 +511,6 @@ kernel_11(half* A,
 
   }
 
-
-
   half alpha_ = (half)alpha;
   half beta_ = (half)beta;
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];

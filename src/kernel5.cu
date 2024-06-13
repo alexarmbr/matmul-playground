@@ -8,29 +8,181 @@
 
 using namespace cute;
 
-template <int ROWS, int COLS, int SWIZZLE_BITS, class TensorSrc, class TensorDst>
-__device__ void tileMemcpySwizzleUnrolledTmp(TensorSrc src, TensorDst dst, const unsigned int src_stride_elements, const unsigned int dst_stride_elements)
+
+template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k>
+__device__ __forceinline__ void ldmatrix_a(
+  half* src,
+  half (&reg)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4],
+  const unsigned int smem_stride
+)
 {
-    assert(COLS % 8 == 0);
-    constexpr int float4_cols = COLS / 8;
-    constexpr int tile_size = float4_cols * ROWS;
-    int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-    int num_threads = blockDim.x * blockDim.y;
-    Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(src.data()), make_shape(ROWS, float4_cols), make_stride(src_stride_elements / 8, 1));
-    // auto swizzled_layout = composition(Swizzle<3,0,SWIZZLE_BITS>{}, make_layout(make_shape(ROWS, float4_cols), make_stride(dst_stride_elements / 8, 1)));
-    auto dst_layout = make_layout(make_shape(ROWS, float4_cols), make_stride(dst_stride_elements / 8, 1));
-    Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(dst.data().get()), dst_layout);
+  static_assert(mma_tiles_per_warp_m == 4, "mma_tiles_per_warp_m must be 4");
+  static_assert(mma_tiles_per_warp_k == 4, "mma_tiles_per_warp_k must be 4");
+
+  uint32_t (&reg_) [mma_tiles_per_warp_m][mma_tiles_per_warp_k][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2]>(reg);
+  unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
+  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b10000000) >> 4);
+  swizzled_offset = swizzled_offset ^ ((swizzled_offset & 0b1100000) >> 2);
+  uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
     
-    #pragma unroll 8
-    while (thread_idx < tile_size)
-    {
-      const unsigned int thread_idx_y = thread_idx / float4_cols;
-      const unsigned int thread_idx_x = thread_idx % float4_cols;
-      dst_float4(thread_idx_y, thread_idx_x) = src_float4(thread_idx_y, thread_idx_x);
-      thread_idx += num_threads;
-    }
+    // 0
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
+      : "r"(src_addr)
+    );
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][2][0]), "=r"(reg_[0][2][1]), "=r"(reg_[1][2][0]), "=r"(reg_[1][2][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][3][0]), "=r"(reg_[0][3][1]), "=r"(reg_[1][3][0]), "=r"(reg_[1][3][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b100000110000;
+
+
+    // 0
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[2][0][0]), "=r"(reg_[2][0][1]), "=r"(reg_[3][0][0]), "=r"(reg_[3][0][1])
+      : "r"(src_addr)
+    );
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][1][0]), "=r"(reg_[2][1][1]), "=r"(reg_[3][1][0]), "=r"(reg_[3][1][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b110000;
+
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][2][0]), "=r"(reg_[2][2][1]), "=r"(reg_[3][2][0]), "=r"(reg_[3][2][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b10000;
+
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][3][0]), "=r"(reg_[2][3][1]), "=r"(reg_[3][3][0]), "=r"(reg_[3][3][1])
+        : "r"(src_addr)
+    );
 }
 
+
+__device__ __forceinline__ void ldmatrix_b(
+  half* src,
+  half (&reg)[4][8][2],
+  const unsigned int smem_stride,
+  half alpha
+
+)
+{
+  uint32_t (&reg_) [4][8] = reinterpret_cast<uint32_t(&)[4][8]>(reg);
+  unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
+  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b1111000000) >> 4);
+  uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
+  // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
+
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][0]), "=r"(reg_[1][0]), "=r"(reg_[2][0]), "=r"(reg_[3][0])
+      : "r"(src_addr)
+  );
+  src_addr ^= 0b10000;
+  
+  // 1
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][1]), "=r"(reg_[1][1]), "=r"(reg_[2][1]), "=r"(reg_[3][1])
+      : "r"(src_addr)
+  );
+  src_addr ^= 0b110000;
+
+  // 2
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][2]), "=r"(reg_[1][2]), "=r"(reg_[2][2]), "=r"(reg_[3][2])
+      : "r"(src_addr)
+  );
+  src_addr ^= 0b10000;
+
+  // 3
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][3]), "=r"(reg_[1][3]), "=r"(reg_[2][3]), "=r"(reg_[3][3])
+      : "r"(src_addr)
+  );
+  src_addr ^= 0b1110000;
+
+  // 4
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][4]), "=r"(reg_[1][4]), "=r"(reg_[2][4]), "=r"(reg_[3][4])
+      : "r"(src_addr)
+  );
+  src_addr ^= 0b10000;
+
+  // 5
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][5]), "=r"(reg_[1][5]), "=r"(reg_[2][5]), "=r"(reg_[3][5])
+      : "r"(src_addr)
+  );
+  src_addr ^= 0b110000;
+  
+  // 6
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][6]), "=r"(reg_[1][6]), "=r"(reg_[2][6]), "=r"(reg_[3][6])
+      : "r"(src_addr)
+  );
+  src_addr ^= 0b10000;
+
+  // 7
+  asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(reg_[0][7]), "=r"(reg_[1][7]), "=r"(reg_[2][7]), "=r"(reg_[3][7])
+      : "r"(src_addr)
+  );
+}
 
 
 template <unsigned int BM_dim,
@@ -39,8 +191,7 @@ unsigned int BK_dim,
 unsigned int WM_dim,
 unsigned int WN_dim,
 unsigned int WK_dim,
-unsigned int A_swizzle_bits,
-unsigned int B_swizzle_bits>
+unsigned int num_threads>
 __global__ void
 kernel_5(half* A,
   half* B,
@@ -61,28 +212,11 @@ kernel_5(half* A,
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;
   constexpr unsigned int mma_tiles_per_warp_m = WM_dim / MMA_M_dim;
   constexpr unsigned int mma_tiles_per_warp_n = WN_dim / MMA_N_dim;
-  constexpr unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
   const unsigned int num_block_tiles_k = K / BK_dim;
   
-  const unsigned int blocks_per_M = M / BM_dim;
   const unsigned int blocks_per_N = N / BN_dim;
-  auto swizzle_tile_dim = Int<4>{};
-  const int block_swizzle_tiles_per_M = blocks_per_M / swizzle_tile_dim;
-  const int block_swizzle_tiles_per_N = blocks_per_N / swizzle_tile_dim;
-  Layout block_n_map = make_layout(
-    make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
-    make_stride(1 ,0, swizzle_tile_dim, 0)
-  );
-
-  Layout block_m_map = make_layout(
-      make_shape(swizzle_tile_dim, swizzle_tile_dim, block_swizzle_tiles_per_N, block_swizzle_tiles_per_M),
-      make_stride(0, 1, 0, swizzle_tile_dim)
-  );
-  
-  const unsigned int block_m = block_m_map(blockIdx.x);
-  const unsigned int block_n = block_n_map(blockIdx.x);
-  // const unsigned int block_m = blockIdx.x / blocks_per_N;
-  // const unsigned int block_n = blockIdx.x % blocks_per_N;
+  const unsigned int block_m = blockIdx.x / blocks_per_N;
+  const unsigned int block_n = blockIdx.x % blocks_per_N;
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
 
@@ -104,32 +238,12 @@ kernel_5(half* A,
   Tensor B_gmem = make_tensor(B, make_shape(K, N), LayoutRight{});
   Tensor C_gmem = make_tensor(C, make_shape(M, N), LayoutRight{});
   Tensor D_gmem = make_tensor(D, make_shape(M, N), LayoutRight{});
-  
-  // auto A_smem_layout = composition(Swizzle<3, 3, A_swizzle_bits>{}, make_layout(A_block_tile_shape, LayoutRight{}));
-  // auto B_smem_layout = composition(Swizzle<3, 3, B_swizzle_bits>{}, make_layout(B_block_tile_shape, LayoutRight{}));
-  auto A_smem_layout = make_layout(A_block_tile_shape, LayoutRight{});
-  auto B_smem_layout = make_layout(B_block_tile_shape, LayoutRight{});
-  Tensor A_smem = make_tensor(make_smem_ptr(A_smem_), A_smem_layout);
-  Tensor B_smem = make_tensor(make_smem_ptr(B_smem_), B_smem_layout);
 
   // block tile each matrix
   Tensor A_block_tiles = zipped_divide(A_gmem, A_block_tile_shape);
   Tensor B_block_tiles = zipped_divide(B_gmem, B_block_tile_shape);
   Tensor C_block_tiles = zipped_divide(C_gmem, CD_block_tile_shape);
   Tensor D_block_tiles = zipped_divide(D_gmem, CD_block_tile_shape);
-  
-  // create warp tiles for a,b inside of shared memory block tiles
-  // Tensor A_warp_tiles = coalesce(zipped_divide(A_smem, A_warp_tile_shape), Step<_1,Step<>>{});
-  // Tensor B_warp_tiles = coalesce(zipped_divide(B_smem, B_warp_tile_shape), Step<_1,Step<>>{});
-  // Tensor B_warp_tiles = zipped_divide(B_smem, B_warp_tile_shape);
-  // if (thread0())
-  // {
-  //   print(A_warp_tiles.layout());
-  // }
-
-  // create mma tiles for a,b inside of warp_tiles
-  // Tensor A_mma_tiles = coalesce(zipped_divide(A_warp_tiles, make_shape(A_mma_tile_shape)), Step<_1,Step<>>{});
-  // Tensor B_mma_tiles = coalesce(zipped_divide(B_warp_tiles, make_shape(B_mma_tile_shape)), Step<_1,Step<>>{});
 
   // create warp and mma tiles for c,d inside of global memory block tiles
   Tensor C_warp_tiles = coalesce(zipped_divide(C_block_tiles, make_shape(CD_warp_tile_shape)), Step<_1,_1>{});
@@ -137,37 +251,31 @@ kernel_5(half* A,
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
-  // declare register storage to hold fragments of C which we will accumulate into
-  half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  // declare register storage for accumulators
+  half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
-          
-          // scale C by beta
-          C_register[mma_m][mma_n][0] *= beta;
-          C_register[mma_m][mma_n][1] *= beta;
-          C_register[mma_m][mma_n][2] *= beta;
-          C_register[mma_m][mma_n][3] *= beta;
+        acc_register[mma_m][mma_n][0] = 0;
+        acc_register[mma_m][mma_n][1] = 0;
+        acc_register[mma_m][mma_n][2] = 0;
+        acc_register[mma_m][mma_n][3] = 0;
       }
   }
 
   Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, 0));
   Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(0, block_n));
-  tileMemcpySwizzleUnrolled<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
-  tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
-  
+  tileMemcpySwizzleUnrolled_A<BM_dim, BK_dim>(A_block_tile.data(), A_smem_, K);
+  tileMemcpySwizzleUnrolled_B<BK_dim, BN_dim>(B_block_tile.data(), B_smem_, N);
+  __syncthreads();
 
   half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
   half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
-  float4 A_gmem_cache_reg[8];
-  float4 B_gmem_cache_reg[4];
-  static_assert(BM_dim == 256, "BM_dim must be 256");
+  float4 A_gmem_cache_reg[4];
+  float4 B_gmem_cache_reg[2];
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
-    
     if (block_k != num_block_tiles_k)
     {
       Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
@@ -185,10 +293,6 @@ kernel_5(half* A,
         A_gmem_cache_reg[1] = src_float4(thread_idx_y + 32, thread_idx_x);
         A_gmem_cache_reg[2] = src_float4(thread_idx_y + 64, thread_idx_x);
         A_gmem_cache_reg[3] = src_float4(thread_idx_y + 96, thread_idx_x);
-        A_gmem_cache_reg[4] = src_float4(thread_idx_y + 128, thread_idx_x);
-        A_gmem_cache_reg[5] = src_float4(thread_idx_y + 160, thread_idx_x);
-        A_gmem_cache_reg[6] = src_float4(thread_idx_y + 192, thread_idx_x);
-        A_gmem_cache_reg[7] = src_float4(thread_idx_y + 224, thread_idx_x);
       }
 
       // copy tile of B from global memory to registers
@@ -200,107 +304,90 @@ kernel_5(half* A,
         const unsigned int thread_idx_x = thread_idx % float4_cols;
         B_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
         B_gmem_cache_reg[1] = src_float4(thread_idx_y + 16, thread_idx_x);
-        B_gmem_cache_reg[2] = src_float4(thread_idx_y + 32, thread_idx_x);
-        B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
       }
     }
+ 
+    ldmatrix_a
+    <mma_tiles_per_warp_m, mma_tiles_per_warp_k>
+    (
+      A_smem_ + (warp_m * WM_dim) * BK_dim,
+      A_mma_tile_reg,
+      BK_dim
+    );
+    ldmatrix_b(
+      B_smem_ + (warp_n * WN_dim),
+      B_mma_tile_reg,
+      BN_dim,
+      alpha
+    );
 
-    for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
+
+    // outer product between tiles of a and b
+    #pragma unroll
+    for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
     {
-        // preload tiles of a into registers
-        // half* A_warp_tile = A_warp_tiles(make_coord(_,_), make_coord(warp_m, warp_k)).data().get();
-        // half* B_warp_tile = B_warp_tiles(make_coord(_,_), make_coord(warp_k, warp_n)).data().get();
+      #pragma unroll
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      {
+        #pragma unroll
         for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
         {
-          for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
-          {
-            unsigned int logical_offset = (((warp_m * WM_dim) + (mma_m * MMA_M_dim) + (threadIdx.x % 16)) * BK_dim) + ((warp_k * WK_dim) + (mma_k * MMA_K_dim));
-            unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b111000000) >> 3);
-            uint32_t (&reg_) [2] = reinterpret_cast<uint32_t(&)[2]>(A_mma_tile_reg[mma_m][mma_k]);
-            // Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(warp_m, warp_k)));
-            // ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[mma_m][mma_k]);
-            asm volatile (
-              "ldmatrix.sync.aligned.m8n8.x2.shared.b16 "
-              "{%0, %1}, [%2];"
-              : "=r"(reg_[0]), "=r"(reg_[1])
-              : "r"(cvta_to_shared_u32(A_smem_ + swizzled_offset))
-              // : "r"(cvta_to_shared_u32(A_smem_ + logical_offset))
+          mma_sync_m16n8k8(
+            acc_register[mma_m][mma_n],
+            A_mma_tile_reg[mma_m][mma_k],
+            B_mma_tile_reg[mma_k][mma_n],
+            acc_register[mma_m][mma_n]
           );
-          }
-        }
-
-        // preload tiles of b into registers
-        for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-        {
-          for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
-          {
-            unsigned int logical_offset = (((warp_k * WK_dim) + (mma_k * MMA_K_dim) + (threadIdx.x % 8)) * BN_dim) + ((warp_n * WN_dim) + (mma_n * MMA_N_dim));
-            unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b1110000000) >> 4);
-            uint32_t &reg_ = reinterpret_cast<uint32_t&>(B_mma_tile_reg[mma_k][mma_n]);
-
-            asm volatile (
-              "ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 "
-              "{%0}, [%1];"
-              : "=r"(reg_)
-              // : "r"(cvta_to_shared_u32(B_smem_ + swizzled_offset))
-              : "r"(cvta_to_shared_u32(B_smem_ + swizzled_offset))
-
-          );
-            B_mma_tile_reg[mma_k][mma_n][0] *= alpha;
-            B_mma_tile_reg[mma_k][mma_n][1] *= alpha;
-          }
-        }
-
-      // outer product between tiles of a and b
-      for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
-      {
-        for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-        {
-          for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-          {
-            mma_sync_m16n8k8(
-              C_register[mma_m][mma_n],
-              A_mma_tile_reg[mma_m][mma_k],
-              B_mma_tile_reg[mma_k][mma_n],
-              C_register[mma_m][mma_n]
-            );
-          }
         }
       }
     }
     __syncthreads();
 
     {
-      constexpr unsigned int float4_cols = BK_dim / 8; // 8
-      auto swizzled_layout = composition(Swizzle<3,0,A_swizzle_bits>{}, make_layout(make_shape(BM_dim, float4_cols), make_stride(BK_dim / 8, 1)));
-      // auto dst_layout = make_layout(make_shape(BM_dim, float4_cols), make_stride(BK_dim / 8, 1));
-      Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(A_smem.data().get()), swizzled_layout);
-      unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-      unsigned int thread_idx_y = thread_idx / float4_cols;
-      unsigned int thread_idx_x = thread_idx % float4_cols;
-      dst_float4(thread_idx_y, thread_idx_x) = A_gmem_cache_reg[0];
-      dst_float4(thread_idx_y + 32, thread_idx_x) = A_gmem_cache_reg[1];
-      dst_float4(thread_idx_y + 64, thread_idx_x) = A_gmem_cache_reg[2];
-      dst_float4(thread_idx_y + 96, thread_idx_x) = A_gmem_cache_reg[3];
-      dst_float4(thread_idx_y + 128, thread_idx_x) = A_gmem_cache_reg[4];
-      dst_float4(thread_idx_y + 160, thread_idx_x) = A_gmem_cache_reg[5];
-      dst_float4(thread_idx_y + 192, thread_idx_x) = A_gmem_cache_reg[6];
-      dst_float4(thread_idx_y + 224, thread_idx_x) = A_gmem_cache_reg[7];
+      float4* A_smem_float4 = reinterpret_cast<float4*>(A_smem_);
+      int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+      constexpr unsigned int iterations = BM_dim * (BK_dim / 8) / num_threads;
+      
+      #pragma unroll
+      for (int i = 0; i < iterations; i++)
+      {
+        unsigned int dst_ind = thread_idx ^ ((thread_idx & 0b10000) >> 4);
+        dst_ind = dst_ind ^ ((dst_ind & 0b1100) >> 2);
+        A_smem_float4[dst_ind] = A_gmem_cache_reg[i];
+        thread_idx += num_threads;
+      }
     }
 
     {
-      constexpr unsigned int float4_cols = BN_dim / 8; // 16
-      auto swizzled_layout = composition(Swizzle<3,0,B_swizzle_bits>{}, make_layout(make_shape(BK_dim, float4_cols), make_stride(BN_dim / 8, 1)));
-      // auto dst_layout = make_layout(make_shape(BK_dim, float4_cols), make_stride(BN_dim / 8, 1));
-      unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-      unsigned int thread_idx_y = thread_idx / float4_cols;
-      unsigned int thread_idx_x = thread_idx % float4_cols;
-      Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(B_smem.data().get()), swizzled_layout);
-      dst_float4(thread_idx_y, thread_idx_x) = B_gmem_cache_reg[0];
-      dst_float4(thread_idx_y + 16, thread_idx_x) = B_gmem_cache_reg[1];
-      dst_float4(thread_idx_y + 32, thread_idx_x) = B_gmem_cache_reg[2];
-      dst_float4(thread_idx_y + 48, thread_idx_x) = B_gmem_cache_reg[3];
+      float4* B_smem_float4 = reinterpret_cast<float4*>(B_smem_);
+      int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+      constexpr unsigned int iterations = BK_dim * (BN_dim / 8) / num_threads;
+
+      #pragma unroll
+      for (int i = 0; i < iterations; i++)
+      {
+        const unsigned int dst_ind = thread_idx ^ ((thread_idx & 0b1110000) >> 4);
+        B_smem_float4[dst_ind] = B_gmem_cache_reg[i];
+        thread_idx += num_threads;
+      }
     }
+
+  }
+
+  half alpha_ = (half)alpha;
+  half beta_ = (half)beta;
+  half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+  {
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      {
+        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
+        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+        acc_register[mma_m][mma_n][0] = acc_register[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
+        acc_register[mma_m][mma_n][1] = acc_register[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
+        acc_register[mma_m][mma_n][2] = acc_register[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
+        acc_register[mma_m][mma_n][3] = acc_register[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
+      }
   }
 
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
@@ -308,7 +395,7 @@ kernel_5(half* A,
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
         Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        stmatrix_m16n8(D_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+        stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
       }
   }
 }
@@ -318,7 +405,7 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     
   constexpr unsigned int BM_dim = 256;
   constexpr unsigned int BN_dim = 128;
-  constexpr unsigned int BK_dim = 64;
+  constexpr unsigned int BK_dim = 32;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 4;
   constexpr unsigned int WARPS_PER_BLOCK_N = 2;
@@ -339,16 +426,17 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int WARP_SIZE = 32;
     const unsigned int BlocksM = M / BM_dim;
     const unsigned int BlocksN = N / BN_dim;
-    const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
-    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
-    const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
-    constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
-    constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
+    constexpr unsigned int ThreadsM = WARPS_PER_BLOCK_M;
+    constexpr unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
+    constexpr unsigned int num_threads = ThreadsM * ThreadsN;
+    constexpr unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+    // constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
+    // constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
 
     dim3 gridDim(BlocksN * BlocksM, 1);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_5<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_5<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, num_threads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
@@ -357,7 +445,7 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
         timer.Start();
         kernel_5
         <BM_dim, BN_dim, BK_dim,
-        WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>
+        WM_dim, WN_dim, WK_dim, num_threads>
         <<<gridDim, blockDim, shmem_bytes>>>(
             device_sgemm_params.A,
             device_sgemm_params.B,
