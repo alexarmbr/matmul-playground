@@ -131,7 +131,6 @@ kernel_1(half* A,
           ldmatrix_n8k8(B_mma_tile.data().get(), B_register[mma_k][mma_n], BN_dim * sizeof(half));
         }
       }
-    __syncthreads();
 
       // outer product between mma tiles
       for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
@@ -150,6 +149,7 @@ kernel_1(half* A,
         }
       }
     }
+    __syncthreads();
   }
 
 
@@ -171,7 +171,6 @@ kernel_1(half* A,
         acc_register[mma_m][mma_n][3] = acc_register[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
       }
   }
-
 
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {

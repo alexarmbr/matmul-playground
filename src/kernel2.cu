@@ -92,22 +92,16 @@ kernel_2(half* A,
   Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
   Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
 
-  // declare register storage to hold fragments of C which we will accumulate into
-  half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
-  half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-  half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
+  // declare register storage for accumulators
+  half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
-          
-          // scale C by beta
-          C_register[mma_m][mma_n][0] *= beta;
-          C_register[mma_m][mma_n][1] *= beta;
-          C_register[mma_m][mma_n][2] *= beta;
-          C_register[mma_m][mma_n][3] *= beta;
+        acc_register[mma_m][mma_n][0] = 0;
+        acc_register[mma_m][mma_n][1] = 0;
+        acc_register[mma_m][mma_n][2] = 0;
+        acc_register[mma_m][mma_n][3] = 0;
       }
   }
 
@@ -117,13 +111,13 @@ kernel_2(half* A,
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
     tileMemcpySwizzle<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
     tileMemcpySwizzle<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
-
     __syncthreads();
 
     // preload tiles of a into registers
     for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
     {
       // preload tiles of a into registers
+      half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
       for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
       {
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
@@ -134,14 +128,13 @@ kernel_2(half* A,
       }
 
       // preload tiles of b into registers
+      half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
         {
           Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(warp_k, warp_n)));
           ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[mma_k][mma_n]);
-          B_mma_tile_reg[mma_k][mma_n][0] *= alpha;
-          B_mma_tile_reg[mma_k][mma_n][1] *= alpha;
         }
       }
 
@@ -153,17 +146,35 @@ kernel_2(half* A,
           for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
           {
             mma_sync_m16n8k8(
-              C_register[mma_m][mma_n],
+              acc_register[mma_m][mma_n],
               A_mma_tile_reg[mma_m][mma_k],
               B_mma_tile_reg[mma_k][mma_n],
-              C_register[mma_m][mma_n]
+              acc_register[mma_m][mma_n]
             );
           }
         }
       }
     }
     __syncthreads();
+  }
 
+  // epilogue
+  half alpha_ = (half)alpha;
+  half beta_ = (half)beta;
+  half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+  {
+      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+      {
+        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
+        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+          
+        // scale C by beta
+        acc_register[mma_m][mma_n][0] = acc_register[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
+        acc_register[mma_m][mma_n][1] = acc_register[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
+        acc_register[mma_m][mma_n][2] = acc_register[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
+        acc_register[mma_m][mma_n][3] = acc_register[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
+      }
   }
 
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
@@ -171,7 +182,7 @@ kernel_2(half* A,
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
         Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        stmatrix_m16n8(D_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+        stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
       }
   }
 }
@@ -180,11 +191,11 @@ void kernel_2_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
 {
     
   constexpr unsigned int BM_dim = 256;
-  constexpr unsigned int BN_dim = 256;
+  constexpr unsigned int BN_dim = 128;
   constexpr unsigned int BK_dim = 64;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 4;
-  constexpr unsigned int WARPS_PER_BLOCK_N = 4;
+  constexpr unsigned int WARPS_PER_BLOCK_N = 2;
   constexpr unsigned int WARPS_PER_BLOCK_K = 2;
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
