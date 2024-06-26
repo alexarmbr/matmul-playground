@@ -1,7 +1,6 @@
 #include <cublas_v2.h>
 
 #include "structs_n_stuff.cuh"
-#include "device_utils.cuh"
 
 void cublas_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {

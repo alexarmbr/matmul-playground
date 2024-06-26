@@ -2,40 +2,60 @@
 #include <cuda.h>
 #include <assert.h>
 
-// load TILE_ROWS * TILE_COLS from src into dst
-// assumes 1d theadblock, i.e. threadIdx.y always equals 0
-// iterations is the # of times we need to iterate, passed
-// as a parameter so that each thread isnt computing the same
-// value. It is ceil((TILE_ROWS * TILE_COLS) / blockDim.x)
-template<unsigned int TILE_ROWS,
-unsigned int TILE_COLS,
-typename T>
-__device__ void tileMemcpy(
-    T* src,
-    T* dst,
+__device__ void tileMemcpyNaive(
+    half* src,
+    half* dst,
     const unsigned int src_stride,
-    const unsigned int dst_stride
+    const unsigned int tile_rows,
+    const unsigned int tile_cols
 )
 {
-    // assert(row_iterations * column_iterations * blockDim.x == TILE_ROWS * TILE_COLS);
-    int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-    int num_threads = blockDim.x * blockDim.y;
+    // flatten out 2d grid of threads into in order of increasing threadIdx.x
+    const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+    const unsigned int num_threads = blockDim.x * blockDim.y;
     
-    const unsigned int row_step = max(1, num_threads / TILE_COLS);
-    const unsigned int col_step = num_threads;
+    // # of threads is multiple of # of columns in the tile
+    assert(num_threads % tile_cols == 0);
     
-    // const unsigned int column_iterations = min(1, TILE_COLS / col_step);
-    // const unsigned int row_iterations = TILE_ROWS / row_step;
-
-    const unsigned int thread_row = thread_idx / TILE_COLS;
-    const unsigned int thread_col = thread_idx - (thread_row * TILE_COLS);
+    // assign each thread a row/column in the tile, calculate the column step
+    const unsigned int row_step = num_threads / tile_cols;
+    const unsigned int thread_row = thread_idx / tile_cols;
+    const unsigned int thread_col = thread_idx % tile_cols;
     
-    for (unsigned int r = thread_row; r < TILE_ROWS; r+=row_step)
+    for (unsigned int r = thread_row; r < tile_rows; r+=row_step)
     {
-        for (unsigned int c = thread_col; c < TILE_COLS; c+=col_step)
-        {
-            dst[r * dst_stride + c] =  src[r * src_stride + c];
-        }
+        dst[r * tile_cols + thread_col] =  src[r * src_stride + thread_col];
+    }
+}
+
+
+template<unsigned int TILE_ROWS,
+unsigned int TILE_COLS,
+unsigned int NUM_THREADS>
+__device__ void tileMemcpy(
+    half* src,
+    half* dst,
+    const unsigned int src_stride
+)
+{
+    // # of threads is multiple of # of columns in the tile
+    static_assert(NUM_THREADS % TILE_COLS == 0);
+    
+    // flatten out 2d grid of threads into in order of increasing threadIdx.x
+    const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+
+    // assign each thread a row/column in the tile, calculate how many iterations we need
+    // to cover the whole tile
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS;
+    constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
+    unsigned int thread_row = thread_idx / TILE_COLS;
+    const unsigned int thread_col = thread_idx % TILE_COLS;
+    
+    #pragma unroll
+    for (unsigned int i = 0; i < NUM_ITERS; i++)
+    {
+        dst[thread_row * TILE_COLS + thread_col] =  src[thread_row * src_stride + thread_col];
+        thread_row += ROW_STEP;
     }
     
 }

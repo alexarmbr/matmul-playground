@@ -13,7 +13,8 @@ unsigned int BN_dim,
 unsigned int BK_dim,
 unsigned int WM_dim,
 unsigned int WN_dim,
-unsigned int WK_dim>
+unsigned int WK_dim,
+unsigned int NUM_THREADS>
 __global__ void
 kernel_1(half* A,
   half* B,
@@ -103,8 +104,10 @@ kernel_1(half* A,
   {
     Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
     Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-    tileMemcpy<BM_dim, BK_dim, half>(A_block_tile.data(), A_smem.data().get(), K, BK_dim);
-    tileMemcpy<BK_dim, BN_dim, half>(B_block_tile.data(), B_smem.data().get(), N, BN_dim);
+    // tileMemcpyNaive(A_block_tile.data(), A_smem.data().get(), K, BM_dim, BK_dim);
+    // tileMemcpyNaive(B_block_tile.data(), B_smem.data().get(), N, BK_dim, BN_dim);
+    tileMemcpy<BM_dim, BK_dim, NUM_THREADS>(A_block_tile.data(), A_smem.data().get(), K);
+    tileMemcpy<BK_dim, BN_dim, NUM_THREADS>(B_block_tile.data(), B_smem.data().get(), N);
     __syncthreads();
 
     for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
@@ -208,14 +211,15 @@ void kernel_1_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int WARP_SIZE = 32;
     const unsigned int BlocksM = M / BM_dim;
     const unsigned int BlocksN = N / BN_dim;
-    const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
-    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
+    constexpr unsigned int ThreadsM = WARPS_PER_BLOCK_M;
+    constexpr unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
+    constexpr unsigned int NumThreads = ThreadsM * ThreadsN;
     const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_1<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_1<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, NumThreads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
@@ -224,7 +228,7 @@ void kernel_1_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
         timer.Start();
         kernel_1
         <BM_dim, BN_dim, BK_dim,
-        WM_dim, WN_dim, WK_dim>
+        WM_dim, WN_dim, WK_dim, NumThreads>
         <<<gridDim, blockDim, shmem_bytes>>>(
             device_sgemm_params.A,
             device_sgemm_params.B,
