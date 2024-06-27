@@ -1,6 +1,7 @@
 #pragma once
 #include <cuda.h>
 #include <assert.h>
+#include <iostream>
 
 /////////////////////////////////////////////////////////
 // progressively more optimized versions of tileMemcpy //

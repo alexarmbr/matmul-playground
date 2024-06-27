@@ -49,8 +49,12 @@ kernel_2(half* A,
   half* A_block_smem = shmem;
   half* B_block_smem = &shmem[BM_dim * BK_dim];
 
-  // declare register storage for accumulators
+  // declare register storage, make sure registers that we will be accumulating
+  // into start at 0
   half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  uint32_t A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2];
+  uint32_t B_register[mma_tiles_per_warp_k][mma_tiles_per_warp_n][1];
+
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
@@ -76,18 +80,25 @@ kernel_2(half* A,
       // preload tiles of a into registers
       half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim) + (warp_k * WK_dim);
       half* B_warp_tile = B_block_smem + (warp_k * WK_dim * BN_dim) + (warp_n * WN_dim);
-      half A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
       for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
       {
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
         {
+          // offset to the top left of the mma
           half* A_mma_tile = A_warp_tile + (mma_m * MMA_M_dim * BK_dim) + (mma_k * MMA_K_dim);
-          ldmatrix_m16n8(A_mma_tile, A_register[mma_m][mma_k], BK_dim * sizeof(half));
+
+          // load a 16x8 mma tile of A using ldmatrix
+          const unsigned int thread_row = threadIdx.x % MMA_M_dim;
+          const unsigned int 
+
+
+
+
+          // ldmatrix_m16n8(A_mma_tile, A_register[mma_m][mma_k], BK_dim * sizeof(half));
         }
       }
 
       // preload tiles of b into registers
-      half B_register[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
       for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
       {
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
