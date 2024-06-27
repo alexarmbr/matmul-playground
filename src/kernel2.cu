@@ -40,6 +40,7 @@ kernel_2(half* A,
   constexpr unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
   const unsigned int num_block_tiles_k = K / BK_dim;
   
+  // calculate block/warp indices
   const unsigned int block_m = blockIdx.y;
   const unsigned int block_n = blockIdx.x;
   const unsigned int warp_m = threadIdx.y;
@@ -49,20 +50,25 @@ kernel_2(half* A,
   half* A_block_smem = shmem;
   half* B_block_smem = &shmem[BM_dim * BK_dim];
 
-  // declare register storage, make sure registers that we will be accumulating
-  // into start at 0
-  half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
-  uint32_t A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2];
-  uint32_t B_register[mma_tiles_per_warp_k][mma_tiles_per_warp_n][1];
+  // declare register storage
+  // ptx instructions expect uint32_t registers, where each uint32_t is 2 halfs packed together  
+  uint32_t acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2];
+  
+  // convenience cast to half for accumulator registers
+  half (&acc_register_) [mma_tiles_per_warp_m][mma_tiles_per_warp_n][4] = reinterpret_cast<half(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4]>(acc_register);
 
+  uint32_t A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2];
+  uint32_t B_register[mma_tiles_per_warp_k][mma_tiles_per_warp_n];
+
+  // into start at 0
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        acc_register[mma_m][mma_n][0] = 0;
-        acc_register[mma_m][mma_n][1] = 0;
-        acc_register[mma_m][mma_n][2] = 0;
-        acc_register[mma_m][mma_n][3] = 0;
+        acc_register_[mma_m][mma_n][0] = 0;
+        acc_register_[mma_m][mma_n][1] = 0;
+        acc_register_[mma_m][mma_n][2] = 0;
+        acc_register_[mma_m][mma_n][3] = 0;
       }
   }
 
@@ -80,21 +86,28 @@ kernel_2(half* A,
       // preload tiles of a into registers
       half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim) + (warp_k * WK_dim);
       half* B_warp_tile = B_block_smem + (warp_k * WK_dim * BN_dim) + (warp_n * WN_dim);
+      uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
+      uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
+
       for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
       {
         for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
         {
-          // offset to the top left of the mma
-          half* A_mma_tile = A_warp_tile + (mma_m * MMA_M_dim * BK_dim) + (mma_k * MMA_K_dim);
-
-          // load a 16x8 mma tile of A using ldmatrix
-          const unsigned int thread_row = threadIdx.x % MMA_M_dim;
-          const unsigned int 
-
-
-
-
-          // ldmatrix_m16n8(A_mma_tile, A_register[mma_m][mma_k], BK_dim * sizeof(half));
+          // byte offset to the top left of the mma tile
+          const unsigned int mma_tile_byte_offset = ((mma_m * MMA_M_dim * BK_dim) + (mma_k * MMA_K_dim)) * sizeof(half);
+          
+          // byte offset to the start of this thread's slice of the mma tile
+          const unsigned int thread_byte_offset = (threadIdx.x % MMA_M_dim) * BK_dim * sizeof(half);
+          
+          // calculate offset in bytes WRT to the start of our shared memory allocation
+          const unsigned int thread_offset_bytes = A_warp_tile_byte_offset + mma_tile_byte_offset + thread_byte_offset;
+          
+          asm volatile (
+            "ldmatrix.sync.aligned.m8n8.x2.shared.b16 "
+            "{%0, %1}, [%2];"
+            : "=r"(A_register[mma_m][mma_k][0]), "=r"(A_register[mma_m][mma_k][1])
+            : "r"(thread_offset_bytes)
+          );
         }
       }
 
@@ -103,8 +116,15 @@ kernel_2(half* A,
       {
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
-          half* B_mma_tile = B_warp_tile + (mma_k * MMA_K_dim * BN_dim) + (mma_n * MMA_N_dim);
-          ldmatrix_n8k8(B_mma_tile, B_register[mma_k][mma_n], BN_dim * sizeof(half));
+          const unsigned int mma_tile_byte_offset = ((mma_k * MMA_K_dim * BN_dim) + (mma_n * MMA_N_dim)) * sizeof(half);
+          const unsigned int thread_byte_offset = (threadIdx.x % MMA_K_dim) * BN_dim * sizeof(half);
+          const unsigned int thread_offset_bytes = B_warp_tile_byte_offset + mma_tile_byte_offset + thread_byte_offset;
+          asm volatile (
+            "ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 "
+            "{%0}, [%1];"
+            : "=r"(B_register[mma_k][mma_n])
+            : "r"(thread_offset_bytes)
+        );
         }
       }
 
@@ -115,11 +135,16 @@ kernel_2(half* A,
         {
           for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
           {
-            mma_sync_m16n8k8(
-              acc_register[mma_m][mma_n],
-              A_register[mma_m][mma_k],
-              B_register[mma_k][mma_n],
-              acc_register[mma_m][mma_n]
+            asm volatile (
+              "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+              "{%0, %1}, "
+              "{%2, %3}, "
+              "{%4}, "
+              "{%5, %6};"
+              : "=r"(acc_register[mma_m][mma_n][0]), "=r"(acc_register[mma_m][mma_n][1])
+              : "r"(A_register[mma_m][mma_k][0]), "r"(A_register[mma_m][mma_k][1]),
+                "r"(B_register[mma_k][mma_n])
+                "r"(acc_register[mma_m][mma_n][0]), "r"(acc_register[mma_m][mma_n][1])
             );
           }
         }
@@ -149,10 +174,10 @@ kernel_2(half* A,
         ldmatrix_m16n8_gmem(C_mma_tile, C_register[mma_m][mma_n], N * sizeof(half));
           
         // scale C by beta
-        acc_register[mma_m][mma_n][0] = acc_register[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
-        acc_register[mma_m][mma_n][1] = acc_register[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
-        acc_register[mma_m][mma_n][2] = acc_register[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
-        acc_register[mma_m][mma_n][3] = acc_register[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
+        acc_register_[mma_m][mma_n][0] = acc_register_[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
+        acc_register_[mma_m][mma_n][1] = acc_register_[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
+        acc_register_[mma_m][mma_n][2] = acc_register_[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
+        acc_register_[mma_m][mma_n][3] = acc_register_[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
       }
   }
 
@@ -161,7 +186,7 @@ kernel_2(half* A,
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
         half* D_mma_tile = D_warp_gmem + (mma_m * MMA_M_dim * CD_stride) + (mma_n * MMA_N_dim);
-        stmatrix_m16n8(D_mma_tile, acc_register[mma_m][mma_n], N * sizeof(half));
+        stmatrix_m16n8(D_mma_tile, acc_register_[mma_m][mma_n], N * sizeof(half));
       }
   }
 }
