@@ -193,7 +193,7 @@ unsigned int WN_dim,
 unsigned int WK_dim,
 unsigned int num_threads>
 __global__ void
-kernel_5(half* A,
+kernel_6(half* A,
   half* B,
   half* C,
   half* D,
@@ -264,14 +264,41 @@ kernel_5(half* A,
       }
   }
 
+  // set up pointers into shared memory tile for A
+  half* A_smem_warp = A_smem_ + (warp_m * WM_dim) * BK_dim;
+  uint32_t A_offset_1 = (threadIdx.x % 32) * BK_dim;
+  uint32_t A_offset_2 = ((threadIdx.x % 32) + 32) * BK_dim;
+  A_offset_1 = cvta_to_shared_u32(A_smem_warp + A_offset_1);
+  A_offset_2 = cvta_to_shared_u32(A_smem_warp + A_offset_2);
+  A_offset_1 = A_offset_1 ^ ((A_offset_1 & 0b100000000) >> 4);
+  A_offset_2 = A_offset_2 ^ ((A_offset_2 & 0b100000000) >> 4);
+  A_offset_1 = A_offset_1 ^ ((A_offset_1 & 0b11000000) >> 2);
+  A_offset_2 = A_offset_2 ^ ((A_offset_2 & 0b11000000) >> 2);
+
+  // if (thread0())
+  // {
+  //   printf("offset 1: %d, offset 2: %d\n", A_offset_1, A_offset_2);
+  // }
+
+  // A_offset_1 <<= 1; // convert from half offset to byte offset
+  // A_offset_2 <<= 1;
+  // const int A_increment_xor_patterns[4] = {
+  //   0b10000,
+  //   0b110000,
+  //   0b10000,
+  //   0b110000
+  // };
+
+
   Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, 0));
   Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(0, block_n));
   tileMemcpySwizzleUnrolled_A<BM_dim, BK_dim>(A_block_tile.data(), A_smem_, K);
   tileMemcpySwizzleUnrolled_B<BK_dim, BN_dim>(B_block_tile.data(), B_smem_, N);
   __syncthreads();
 
-  half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
+  half A_mma_tile_reg[mma_tiles_per_warp_m][4];
   half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
+  uint32_t (&A_mma_tile_reg_) [mma_tiles_per_warp_m][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][2]>(A_mma_tile_reg);
   float4 A_gmem_cache_reg[4];
   float4 B_gmem_cache_reg[2];
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
@@ -307,13 +334,13 @@ kernel_5(half* A,
       }
     }
  
-    ldmatrix_a
-    <mma_tiles_per_warp_m, mma_tiles_per_warp_k>
-    (
-      A_smem_ + (warp_m * WM_dim) * BK_dim,
-      A_mma_tile_reg,
-      BK_dim
-    );
+    // ldmatrix_a
+    // <mma_tiles_per_warp_m, mma_tiles_per_warp_k>
+    // (
+    //   A_smem_ + (warp_m * WM_dim) * BK_dim,
+    //   A_mma_tile_reg,
+    //   BK_dim
+    // );
     ldmatrix_b(
       B_smem_ + (warp_n * WN_dim),
       B_mma_tile_reg,
@@ -326,6 +353,20 @@ kernel_5(half* A,
     #pragma unroll
     for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
     {
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(A_mma_tile_reg_[0][0]), "=r"(A_mma_tile_reg_[0][1]), "=r"(A_mma_tile_reg_[1][0]), "=r"(A_mma_tile_reg_[1][1])
+        : "r"(A_offset_1)
+      );
+    
+      asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(A_mma_tile_reg_[2][0]), "=r"(A_mma_tile_reg_[2][1]), "=r"(A_mma_tile_reg_[3][0]), "=r"(A_mma_tile_reg_[3][1])
+        : "r"(A_offset_2)
+      );
+
       #pragma unroll
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
@@ -334,11 +375,30 @@ kernel_5(half* A,
         {
           mma_sync_m16n8k8(
             acc_register[mma_m][mma_n],
-            A_mma_tile_reg[mma_m][mma_k],
+            A_mma_tile_reg[mma_m],
             B_mma_tile_reg[mma_k][mma_n],
             acc_register[mma_m][mma_n]
           );
         }
+      }
+
+      switch (mma_k) {
+        case 0:
+          A_offset_1 ^= 0b10000;
+          A_offset_2 ^= 0b10000;
+          break;
+        case 1:
+          A_offset_1 ^= 0b110000;
+          A_offset_2 ^= 0b110000;
+          break;
+        case 2:
+          A_offset_1 ^= 0b10000;
+          A_offset_2 ^= 0b10000;
+          break;
+        case 3:
+          A_offset_1 ^= 0b110000;
+          A_offset_2 ^= 0b110000;
+          break;
       }
     }
     __syncthreads();
@@ -374,7 +434,6 @@ kernel_5(half* A,
 
   }
 
-  // epilogue
   half alpha_ = (half)alpha;
   half beta_ = (half)beta;
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
@@ -401,7 +460,7 @@ kernel_5(half* A,
   }
 }
 
-void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
   constexpr unsigned int BM_dim = 256;
@@ -437,14 +496,14 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     dim3 gridDim(BlocksN * BlocksM, 1);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_5<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, num_threads>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_6<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, num_threads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        kernel_5
+        kernel_6
         <BM_dim, BN_dim, BK_dim,
         WM_dim, WN_dim, WK_dim, num_threads>
         <<<gridDim, blockDim, shmem_bytes>>>(

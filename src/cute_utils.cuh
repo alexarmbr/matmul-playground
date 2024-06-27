@@ -2,15 +2,7 @@
 #include <cute/tensor.hpp>
 using namespace cute;
 
-constexpr unsigned int int_log2(unsigned int x)
-{
-    unsigned int result = 0;
-    while (x >>= 1)
-    {
-        result++;
-    }
-    return result;
-}
+
 
 template<class Engine, class Layout>
 __device__ void inspect_tensor(Tensor<Engine, Layout> T, const char *name = "")

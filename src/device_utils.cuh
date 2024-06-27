@@ -2,7 +2,12 @@
 #include <cuda.h>
 #include <assert.h>
 
-__device__ void tileMemcpyNaive(
+/////////////////////////////////////////////////////////
+// progressively more optimized versions of tileMemcpy //
+/////////////////////////////////////////////////////////
+
+// reasonable first implementation, coalesced gmem reads, bank conflict free writes
+__device__ __forceinline__ void tileMemcpy(
     half* src,
     half* dst,
     const unsigned int src_stride,
@@ -28,10 +33,11 @@ __device__ void tileMemcpyNaive(
     }
 }
 
+// same as above but with loop unrolled
 template<unsigned int TILE_ROWS,
 unsigned int TILE_COLS,
 unsigned int NUM_THREADS>
-__device__ void tileMemcpyUnrolled(
+__device__ __forceinline__ void tileMemcpyUnrolled(
     half* src,
     half* dst,
     const unsigned int src_stride
@@ -59,11 +65,11 @@ __device__ void tileMemcpyUnrolled(
     
 }
 
-
+// same as above but with vectorized reads/writes
 template<unsigned int TILE_ROWS,
 unsigned int TILE_COLS,
 unsigned int NUM_THREADS>
-__device__ void tileMemcpyUnrolledVectorized(
+__device__ __forceinline__ void tileMemcpyUnrolledVectorized(
     half* src,
     half* dst,
     const unsigned int src_stride
@@ -72,33 +78,75 @@ __device__ void tileMemcpyUnrolledVectorized(
     // reinterpret input/output as float4
     float4* src_float4 = reinterpret_cast<float4*>(src);
     float4* dst_float4 = reinterpret_cast<float4*>(dst);
+    const unsigned int src_stride_vectorized = src_stride / 8;
 
     // # of threads is multiple of # of columns in the tile
-    constexpr unsigned int TILE_COLS_FLOAT4 = TILE_COLS / 4;
-    static_assert(NUM_THREADS % TILE_COLS_FLOAT4 == 0);
+    constexpr unsigned int TILE_COLS_VECTORIZED = TILE_COLS / 8;
+    static_assert(NUM_THREADS % TILE_COLS_VECTORIZED == 0);
     
     // flatten out 2d grid of threads into in order of increasing threadIdx.x
     const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
 
     // assign each thread a row/column in the tile, calculate how many iterations we need
     // to cover the whole tile
-    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_FLOAT4;
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_VECTORIZED;
     constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
-    unsigned int thread_row = thread_idx / TILE_COLS;
-    const unsigned int thread_col = thread_idx % TILE_COLS;
+    unsigned int thread_row = thread_idx / TILE_COLS_VECTORIZED;
+    const unsigned int thread_col = thread_idx % TILE_COLS_VECTORIZED;
     
     #pragma unroll
     for (unsigned int i = 0; i < NUM_ITERS; i++)
     {
-        dst_float4[thread_row * TILE_COLS + thread_col] =  src_float4[thread_row * src_stride + thread_col];
+        dst_float4[thread_row * TILE_COLS_VECTORIZED + thread_col] =  src_float4[thread_row * src_stride_vectorized + thread_col];
         thread_row += ROW_STEP;
     }
     
 }
 
 
+// same as above, but writes are swizzled to avoid bank conflicts when shared memory is read later in the kernel
+template<unsigned int TILE_ROWS,
+unsigned int TILE_COLS,
+unsigned int NUM_THREADS,
+unsigned int SWIZZLE_BITS>
+__device__ __forceinline__ void tileMemcpySwizzle(
+    half* src,
+    half* dst,
+    const unsigned int src_stride
+)
+{
+    constexpr unsigned int SWIZZLE_MASK = 0b111 << SWIZZLE_BITS;
 
+    // reinterpret input/output as float4
+    float4* src_float4 = reinterpret_cast<float4*>(src);
+    float4* dst_float4 = reinterpret_cast<float4*>(dst);
+    const unsigned int src_stride_vectorized = src_stride / 8;
 
+    // # of threads is multiple of # of columns in the tile
+    constexpr unsigned int TILE_COLS_VECTORIZED = TILE_COLS / 8;
+    static_assert(NUM_THREADS % TILE_COLS_VECTORIZED == 0);
+    
+    // flatten out 2d grid of threads into in order of increasing threadIdx.x
+    const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+
+    // assign each thread a row/column in the tile, calculate how many iterations we need
+    // to cover the whole tile
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_VECTORIZED;
+    constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
+    unsigned int thread_row = thread_idx / TILE_COLS_VECTORIZED;
+    const unsigned int thread_col = thread_idx % TILE_COLS_VECTORIZED;
+    
+    #pragma unroll
+    for (unsigned int i = 0; i < NUM_ITERS; i++)
+    {
+        // apply swizzle to the dst index
+        const unsigned int src_index = thread_row * src_stride_vectorized + thread_col;
+        unsigned int dst_index = thread_row * TILE_COLS_VECTORIZED + thread_col;
+        dst_index = dst_index ^ ((dst_index & SWIZZLE_MASK) >> SWIZZLE_BITS);
+        dst_float4[dst_index] =  src_float4[src_index];
+        thread_row += ROW_STEP;
+    }
+}
 
 
 
@@ -307,4 +355,16 @@ __device__ void tileMemcpySwizzleUnrolled_B(half* src, half* dst, const unsigned
         dst_float4[dst_ind] = src_float4[src_ind];
         thread_idx += num_threads;
     }
+}
+
+
+// useful functions
+constexpr unsigned int int_log2(unsigned int x)
+{
+    unsigned int result = 0;
+    while (x >>= 1)
+    {
+        result++;
+    }
+    return result;
 }
