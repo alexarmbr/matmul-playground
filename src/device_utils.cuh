@@ -28,11 +28,10 @@ __device__ void tileMemcpyNaive(
     }
 }
 
-
 template<unsigned int TILE_ROWS,
 unsigned int TILE_COLS,
 unsigned int NUM_THREADS>
-__device__ void tileMemcpy(
+__device__ void tileMemcpyUnrolled(
     half* src,
     half* dst,
     const unsigned int src_stride
@@ -59,6 +58,50 @@ __device__ void tileMemcpy(
     }
     
 }
+
+
+template<unsigned int TILE_ROWS,
+unsigned int TILE_COLS,
+unsigned int NUM_THREADS>
+__device__ void tileMemcpyUnrolledVectorized(
+    half* src,
+    half* dst,
+    const unsigned int src_stride
+)
+{
+    // reinterpret input/output as float4
+    float4* src_float4 = reinterpret_cast<float4*>(src);
+    float4* dst_float4 = reinterpret_cast<float4*>(dst);
+
+    // # of threads is multiple of # of columns in the tile
+    constexpr unsigned int TILE_COLS_FLOAT4 = TILE_COLS / 4;
+    static_assert(NUM_THREADS % TILE_COLS_FLOAT4 == 0);
+    
+    // flatten out 2d grid of threads into in order of increasing threadIdx.x
+    const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+
+    // assign each thread a row/column in the tile, calculate how many iterations we need
+    // to cover the whole tile
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_FLOAT4;
+    constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
+    unsigned int thread_row = thread_idx / TILE_COLS;
+    const unsigned int thread_col = thread_idx % TILE_COLS;
+    
+    #pragma unroll
+    for (unsigned int i = 0; i < NUM_ITERS; i++)
+    {
+        dst_float4[thread_row * TILE_COLS + thread_col] =  src_float4[thread_row * src_stride + thread_col];
+        thread_row += ROW_STEP;
+    }
+    
+}
+
+
+
+
+
+
+
 
 __device__ __forceinline__ uint32_t cvta_to_shared_u32(const void *pointer) {
     uint32_t address;
