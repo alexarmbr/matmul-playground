@@ -152,6 +152,107 @@ __device__ __forceinline__ void tileMemcpySwizzle(
 
 
 
+// same as above, performs only a load into registers, not the store into shared memory
+// this function does not get stalled by memory latency
+template<unsigned int TILE_ROWS,
+unsigned int TILE_COLS,
+unsigned int NUM_THREADS,
+unsigned int SWIZZLE_BITS,
+unsigned int ELEMENTS_PER_THREAD>
+__device__ __forceinline__ void tileMemcpySwizzleLoad(
+    half* src,
+    float4 dst_reg[ELEMENTS_PER_THREAD],
+    const unsigned int src_stride
+)
+{
+    constexpr unsigned int SWIZZLE_MASK = 0b111 << SWIZZLE_BITS;
+
+    // reinterpret input/output as float4
+    float4* src_float4 = reinterpret_cast<float4*>(src);
+    const unsigned int src_stride_vectorized = src_stride / 8;
+
+    // # of threads is multiple of # of columns in the tile
+    constexpr unsigned int TILE_COLS_VECTORIZED = TILE_COLS / 8;
+    static_assert(NUM_THREADS % TILE_COLS_VECTORIZED == 0);
+    
+    // flatten out 2d grid of threads into in order of increasing threadIdx.x
+    const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+
+    // assign each thread a row/column in the tile, calculate how many iterations we need
+    // to cover the whole tile
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_VECTORIZED;
+    constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
+    unsigned int thread_row = thread_idx / TILE_COLS_VECTORIZED;
+    const unsigned int thread_col = thread_idx % TILE_COLS_VECTORIZED;
+    
+    // compile time check that we provided the right amount of registers for storage
+    static_assert(ELEMENTS_PER_THREAD == NUM_ITERS);
+    
+    #pragma unroll
+    for (unsigned int i = 0; i < NUM_ITERS; i++)
+    {
+        // apply swizzle to the dst index
+        const unsigned int src_index = thread_row * src_stride_vectorized + thread_col;
+        unsigned int dst_index = thread_row * TILE_COLS_VECTORIZED + thread_col;
+        dst_index = dst_index ^ ((dst_index & SWIZZLE_MASK) >> SWIZZLE_BITS);
+        dst_reg[i] = src_float4[src_index];
+        thread_row += ROW_STEP;
+    }
+}
+
+
+
+template<unsigned int TILE_ROWS,
+unsigned int TILE_COLS,
+unsigned int NUM_THREADS,
+unsigned int SWIZZLE_BITS,
+unsigned int ELEMENTS_PER_THREAD>
+__device__ __forceinline__ void tileMemcpySwizzleStore(
+    float4 src_reg[ELEMENTS_PER_THREAD],
+    half* dst
+)
+{
+    constexpr unsigned int SWIZZLE_MASK = 0b111 << SWIZZLE_BITS;
+
+    // reinterpret input/output as float4
+    float4* dst_float4 = reinterpret_cast<float4*>(dst);
+
+    // # of threads is multiple of # of columns in the tile
+    constexpr unsigned int TILE_COLS_VECTORIZED = TILE_COLS / 8;
+    static_assert(NUM_THREADS % TILE_COLS_VECTORIZED == 0);
+    
+    // flatten out 2d grid of threads into in order of increasing threadIdx.x
+    const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+
+    // assign each thread a row/column in the tile, calculate how many iterations we need
+    // to cover the whole tile
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_VECTORIZED;
+    constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
+    unsigned int thread_row = thread_idx / TILE_COLS_VECTORIZED;
+    const unsigned int thread_col = thread_idx % TILE_COLS_VECTORIZED;
+    
+    // compile time check that we provided the right amount of registers for storage
+    static_assert(ELEMENTS_PER_THREAD == NUM_ITERS);
+    
+    #pragma unroll
+    for (unsigned int i = 0; i < NUM_ITERS; i++)
+    {
+        // apply swizzle to the dst index
+        unsigned int dst_index = thread_row * TILE_COLS_VECTORIZED + thread_col;
+        dst_index = dst_index ^ ((dst_index & SWIZZLE_MASK) >> SWIZZLE_BITS);
+        dst_float4[dst_index] = src_reg[i];
+        thread_row += ROW_STEP;
+    }
+}
+
+
+
+
+
+
+
+
+
 __device__ __forceinline__ uint32_t cvta_to_shared_u32(const void *pointer) {
     uint32_t address;
     asm("{\n\t"

@@ -60,7 +60,7 @@ kernel_2(half* A,
   uint32_t A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2];
   uint32_t B_register[mma_tiles_per_warp_k][mma_tiles_per_warp_n];
 
-  // into start at 0
+  // accumulators start at 0
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)

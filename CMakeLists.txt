@@ -14,11 +14,14 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 75)
 endif()
 
-file(GLOB SOURCES "src/kernel*.cu")
+# file(GLOB SOURCES "src/kernel*.cu")
+set(SOURCES src/kernel6.cu src/kernel4.cu src/kernel5.cu)
 
-add_library(kernels src/kernel1.cu src/kernel2.cu src/kernel3.cu)
+add_library(kernels ${SOURCES})
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>)
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
+
+target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas -dlcm=cg>)
 
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
 # target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-G>)

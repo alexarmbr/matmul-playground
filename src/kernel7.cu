@@ -193,7 +193,7 @@ unsigned int WN_dim,
 unsigned int WK_dim,
 unsigned int num_threads>
 __global__ void
-kernel_6(half* A,
+kernel_7(half* A,
   half* B,
   half* C,
   half* D,
@@ -460,7 +460,7 @@ kernel_6(half* A,
   }
 }
 
-void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void kernel_7_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
   constexpr unsigned int BM_dim = 256;
@@ -496,14 +496,14 @@ void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     dim3 gridDim(BlocksN * BlocksM, 1);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_6<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, num_threads>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_7<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, num_threads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        kernel_6
+        kernel_7
         <BM_dim, BN_dim, BK_dim,
         WM_dim, WN_dim, WK_dim, num_threads>
         <<<gridDim, blockDim, shmem_bytes>>>(

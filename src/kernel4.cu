@@ -1,15 +1,9 @@
 #include <cuda.h>
 #include <mma.h>
-#include <cute/tensor.hpp>
 
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
-#include "cute_utils.cuh"
 
-using namespace cute;
-
-// constexpr unsigned int maxThreadsPerBlock = 512;
-// constexpr unsigned int minBlocksPerMultiprocessor = 2;
 
 template <unsigned int BM_dim,
 unsigned int BN_dim,
@@ -17,10 +11,9 @@ unsigned int BK_dim,
 unsigned int WM_dim,
 unsigned int WN_dim,
 unsigned int WK_dim,
-unsigned int A_swizzle_bits,
-unsigned int B_swizzle_bits>
+unsigned int NUM_THREADS>
 __global__ void
-kernel_3(half* A,
+kernel_4(half* A,
   half* B,
   half* C,
   half* D,
@@ -30,169 +23,161 @@ kernel_3(half* A,
   const unsigned int N,
   unsigned int K)
 {
-
   constexpr unsigned int MMA_M_dim = 16;
   constexpr unsigned int MMA_N_dim = 8;
   constexpr unsigned int MMA_K_dim = 8;
 
-  // loop bounds
+  // for convenience/readability in index calculations
+  const unsigned int A_stride = K;
+  const unsigned int B_stride = N;
+  const unsigned int CD_stride = N;
+
+  // calculate how many bits of shared memory indices are going to be swizzled, and create masks
+  constexpr unsigned int SWIZZLE_BITS_A = int_log2(BK_dim / 8);
+  constexpr unsigned int SWIZZLE_BITS_B = int_log2(BN_dim / 8);
+  constexpr unsigned int SWIZZLE_MASK_A = 0b1110000 << SWIZZLE_BITS_A;
+  constexpr unsigned int SWIZZLE_MASK_B = 0b1110000 << SWIZZLE_BITS_B;
+
+  // loop bounds, constexpr where possible allows for loop unrolling
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;
   constexpr unsigned int mma_tiles_per_warp_m = WM_dim / MMA_M_dim;
   constexpr unsigned int mma_tiles_per_warp_n = WN_dim / MMA_N_dim;
   constexpr unsigned int warp_tiles_per_block_k = BK_dim / WK_dim;
   const unsigned int num_block_tiles_k = K / BK_dim;
   
-  const unsigned int blocks_per_N = N / BN_dim;
-  const unsigned int block_m = blockIdx.x / blocks_per_N;
-  const unsigned int block_n = blockIdx.x % blocks_per_N;
+  // calculate block/warp indices
+  const unsigned int block_m = blockIdx.y;
+  const unsigned int block_n = blockIdx.x;
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
-
-  auto A_block_tile_shape = make_shape(Int<BM_dim>{}, Int<BK_dim>{});
-  auto B_block_tile_shape = make_shape(Int<BK_dim>{}, Int<BN_dim>{});
-  auto CD_block_tile_shape = make_shape(Int<BM_dim>{}, Int<BN_dim>{});
-  auto A_warp_tile_shape = make_shape(Int<WM_dim>{}, Int<WK_dim>{});
-  auto B_warp_tile_shape = make_shape(Int<WK_dim>{}, Int<WN_dim>{});
-  auto CD_warp_tile_shape = make_shape(Int<WM_dim>{}, Int<WN_dim>{});
-  auto A_mma_tile_shape = make_shape(Int<MMA_M_dim>{}, Int<MMA_K_dim>{});
-  auto B_mma_tile_shape = make_shape(Int<MMA_K_dim>{}, Int<MMA_N_dim>{});
-  auto CD_mma_tile_shape = make_shape(Int<MMA_M_dim>{}, Int<MMA_N_dim>{});
-
+  
   extern __shared__ half shmem[];
-  half* A_smem_ = shmem;
-  half* B_smem_ = &shmem[BM_dim * BK_dim];
+  half* A_block_smem = shmem;
+  half* B_block_smem = &shmem[BM_dim * BK_dim];
 
-  Tensor A_gmem = make_tensor(A, make_shape(M, K), LayoutRight{});
-  Tensor B_gmem = make_tensor(B, make_shape(K, N), LayoutRight{});
-  Tensor C_gmem = make_tensor(C, make_shape(M, N), LayoutRight{});
-  Tensor D_gmem = make_tensor(D, make_shape(M, N), LayoutRight{});
+  // declare register storage
+  // ptx instructions expect uint32_t registers, where each uint32_t is 2 halfs packed together  
+  uint32_t acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2];
   
-  auto A_smem_layout = composition(Swizzle<3, 3, A_swizzle_bits>{}, make_layout(A_block_tile_shape, LayoutRight{}));
-  auto B_smem_layout = composition(Swizzle<3, 3, B_swizzle_bits>{}, make_layout(B_block_tile_shape, LayoutRight{}));
-  Tensor A_smem = make_tensor(make_smem_ptr(A_smem_), A_smem_layout);
-  Tensor B_smem = make_tensor(make_smem_ptr(B_smem_), B_smem_layout);
+  // convenience cast to half for accumulator registers
+  half (&acc_register_) [mma_tiles_per_warp_m][mma_tiles_per_warp_n][4] = reinterpret_cast<half(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4]>(acc_register);
 
-  // block tile each matrix
-  Tensor A_block_tiles = zipped_divide(A_gmem, A_block_tile_shape);
-  Tensor B_block_tiles = zipped_divide(B_gmem, B_block_tile_shape);
-  Tensor C_block_tiles = zipped_divide(C_gmem, CD_block_tile_shape);
-  Tensor D_block_tiles = zipped_divide(D_gmem, CD_block_tile_shape);
-  
-  // create warp tiles for a,b inside of shared memory block tiles
-  Tensor A_warp_tiles = zipped_divide(A_smem, A_warp_tile_shape);
-  Tensor B_warp_tiles = zipped_divide(B_smem, B_warp_tile_shape);
+  uint32_t A_register[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2];
+  uint32_t B_register[mma_tiles_per_warp_k][mma_tiles_per_warp_n];
 
-  // create mma tiles for a,b inside of warp_tiles
-  Tensor A_mma_tiles = coalesce(zipped_divide(A_warp_tiles, make_shape(A_mma_tile_shape)), Step<_1,Step<>>{});
-  Tensor B_mma_tiles = coalesce(zipped_divide(B_warp_tiles, make_shape(B_mma_tile_shape)), Step<_1,Step<>>{});
-
-  // create warp and mma tiles for c,d inside of global memory block tiles
-  Tensor C_warp_tiles = coalesce(zipped_divide(C_block_tiles, make_shape(CD_warp_tile_shape)), Step<_1,_1>{});
-  Tensor D_warp_tiles = coalesce(zipped_divide(D_block_tiles, make_shape(CD_warp_tile_shape)), Step<_1,_1>{});
-  Tensor C_mma_tiles = coalesce(zipped_divide(C_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
-  Tensor D_mma_tiles = coalesce(zipped_divide(D_warp_tiles, make_shape(CD_mma_tile_shape)), Step<_1,_1>{});
-
-  // declare register storage for accumulators
-  half acc_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  // accumulators start at 0
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        acc_register[mma_m][mma_n][0] = 0;
-        acc_register[mma_m][mma_n][1] = 0;
-        acc_register[mma_m][mma_n][2] = 0;
-        acc_register[mma_m][mma_n][3] = 0;
+        acc_register_[mma_m][mma_n][0] = 0;
+        acc_register_[mma_m][mma_n][1] = 0;
+        acc_register_[mma_m][mma_n][2] = 0;
+        acc_register_[mma_m][mma_n][3] = 0;
       }
   }
 
-  Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, 0));
-  Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(0, block_n));
-  tileMemcpySwizzleUnrolled<BM_dim, BK_dim, A_swizzle_bits>(A_block_tile, A_smem, K, BK_dim);
-  tileMemcpySwizzleUnrolled<BK_dim, BN_dim, B_swizzle_bits>(B_block_tile, B_smem, N, BN_dim);
-  __syncthreads();
-  
 
-  half A_mma_tile_reg[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4];
-  half B_mma_tile_reg[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2];
+  // these register arrays are used to cache values pre-fetched from global memory during the inner loop of the kernel
+  // the code is nicer if we hard code it for these tile dimensions and number of threads
+  // since we performing this copy with float4 pointers, for these tile dimensions it works out to be 8 float4s for A and 4 float4s for B
+  static_assert(BM_dim == 256);
+  static_assert(BN_dim == 128);
+  static_assert(BK_dim == 64);
+  static_assert(NUM_THREADS == 256);
   float4 A_gmem_cache_reg[8];
-  // float4 B_gmem_cache_reg[8];
   float4 B_gmem_cache_reg[4];
-  static_assert(BM_dim == 256, "BM_dim must be 256");
-  // static_assert(BN_dim == 256, "BN_dim must be 256");
+
+
+  // prefetch the first block tile of A,B into shared memory
+  half* A_block_gmem = A + (block_m * BM_dim * A_stride);
+  half* B_block_gmem = B + (block_n * BN_dim);
+  tileMemcpySwizzle<BM_dim, BK_dim, NUM_THREADS, SWIZZLE_BITS_A>(A_block_gmem, A_block_smem, K);
+  tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem, N);
+  __syncthreads();
+
+
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
-    
     if (block_k != num_block_tiles_k)
     {
-      Tensor A_block_tile = A_block_tiles(make_coord(_,_), make_coord(block_m, block_k));
-      Tensor B_block_tile = B_block_tiles(make_coord(_,_), make_coord(block_k, block_n));
-      // copy tile of A from global memory to registers
-      // we want these memory requests to be in flight while the mmas are being computed
-      {
-        constexpr unsigned int float4_cols = BK_dim / 8; // 8
-        Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(A_block_tile.data()), make_shape(BM_dim, float4_cols), make_stride(K / 8, 1));
-        unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-        const unsigned int thread_idx_y = thread_idx / float4_cols;
-        const unsigned int thread_idx_x = thread_idx % float4_cols;
-
-        A_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-        A_gmem_cache_reg[1] = src_float4(thread_idx_y + 32, thread_idx_x);
-        A_gmem_cache_reg[2] = src_float4(thread_idx_y + 64, thread_idx_x);
-        A_gmem_cache_reg[3] = src_float4(thread_idx_y + 96, thread_idx_x);
-        A_gmem_cache_reg[4] = src_float4(thread_idx_y + 128, thread_idx_x);
-        A_gmem_cache_reg[5] = src_float4(thread_idx_y + 160, thread_idx_x);
-        A_gmem_cache_reg[6] = src_float4(thread_idx_y + 192, thread_idx_x);
-        A_gmem_cache_reg[7] = src_float4(thread_idx_y + 224, thread_idx_x);
-      }
-
-      // copy tile of B from global memory to registers
-      {
-        constexpr unsigned int float4_cols = BN_dim / 8; // 16
-        Tensor src_float4 = make_tensor(reinterpret_cast<float4*>(B_block_tile.data()), make_shape(BK_dim, float4_cols), make_stride(N / 8, 1));
-        unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-        const unsigned int thread_idx_y = thread_idx / float4_cols;
-        const unsigned int thread_idx_x = thread_idx % float4_cols;
-        B_gmem_cache_reg[0] = src_float4(thread_idx_y, thread_idx_x);
-        B_gmem_cache_reg[1] = src_float4(thread_idx_y + 16, thread_idx_x);
-        B_gmem_cache_reg[2] = src_float4(thread_idx_y + 32, thread_idx_x);
-        B_gmem_cache_reg[3] = src_float4(thread_idx_y + 48, thread_idx_x);
-      }
+      half* A_block_gmem = A + (block_m * BM_dim * A_stride) + (block_k * BK_dim);
+      half* B_block_gmem = B + (block_k * BK_dim * B_stride) + (block_n * BN_dim);
+      tileMemcpySwizzleLoad<BM_dim, BK_dim, NUM_THREADS, SWIZZLE_BITS_A, 8>(A_block_gmem, A_gmem_cache_reg, K);
+      tileMemcpySwizzleLoad<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 4>(B_block_gmem, B_gmem_cache_reg, N);
     }
+
+    __syncthreads();
 
     for (unsigned int warp_k = 0; warp_k < warp_tiles_per_block_k; warp_k++)
     {
-        // preload tiles of a into registers
-        for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-        {
-          for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
-          {
-            Tensor A_mma_tile = A_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_m, mma_k), make_coord(warp_m, warp_k)));
-            ldmatrix_m16n8(A_mma_tile, A_mma_tile_reg[mma_m][mma_k]);
-          }
-        }
+      
+      // preload tiles of a into registers
+      half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim) + (warp_k * WK_dim);
+      half* B_warp_tile = B_block_smem + (warp_k * WK_dim * BN_dim) + (warp_n * WN_dim);
+      uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
+      uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
 
-        // preload tiles of b into registers
+      for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+      {
+        for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+        {
+          // byte offset to the top left of the mma tile
+          const unsigned int mma_tile_byte_offset = ((mma_m * MMA_M_dim * BK_dim) + (mma_k * MMA_K_dim)) * sizeof(half);
+          
+          // byte offset to the start of this thread's slice of the mma tile
+          const unsigned int thread_byte_offset = (threadIdx.x % MMA_M_dim) * BK_dim * sizeof(half);
+          
+          // calculate offset in bytes WRT to the start of our shared memory allocation
+          unsigned int thread_offset_bytes = A_warp_tile_byte_offset + mma_tile_byte_offset + thread_byte_offset;
+          
+          // apply swizzle to each threads byte offset
+          thread_offset_bytes = thread_offset_bytes ^ ((thread_offset_bytes & SWIZZLE_MASK_A) >> SWIZZLE_BITS_A);
+          
+          asm volatile (
+            "ldmatrix.sync.aligned.m8n8.x2.shared.b16 "
+            "{%0, %1}, [%2];"
+            : "=r"(A_register[mma_m][mma_k][0]), "=r"(A_register[mma_m][mma_k][1])
+            : "r"(thread_offset_bytes)
+          );
+        }
+      }
+
+      // preload tiles of b into registers
+      for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
+      {
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
-          for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
-          {
-            Tensor B_mma_tile = B_mma_tiles(make_coord(_,_), make_coord(make_coord(mma_k, mma_n), make_coord(warp_k, warp_n)));
-            ldmatrix_n8k8(B_mma_tile, B_mma_tile_reg[mma_k][mma_n]);
-          }
+          const unsigned int mma_tile_byte_offset = ((mma_k * MMA_K_dim * BN_dim) + (mma_n * MMA_N_dim)) * sizeof(half);
+          const unsigned int thread_byte_offset = (threadIdx.x % MMA_K_dim) * BN_dim * sizeof(half);
+          unsigned int thread_offset_bytes = B_warp_tile_byte_offset + mma_tile_byte_offset + thread_byte_offset;
+          thread_offset_bytes = thread_offset_bytes ^ ((thread_offset_bytes & SWIZZLE_MASK_B) >> SWIZZLE_BITS_B);
+          asm volatile (
+            "ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 "
+            "{%0}, [%1];"
+            : "=r"(B_register[mma_k][mma_n])
+            : "r"(thread_offset_bytes)
+        );
         }
+      }
 
-      // outer product between tiles of a and b
+      // outer product between mma tiles
       for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
       {
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
           for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
           {
-            mma_sync_m16n8k8(
-              acc_register[mma_m][mma_n],
-              A_mma_tile_reg[mma_m][mma_k],
-              B_mma_tile_reg[mma_k][mma_n],
-              acc_register[mma_m][mma_n]
+            asm volatile (
+              "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+              "{%0, %1}, "
+              "{%2, %3}, "
+              "{%4}, "
+              "{%5, %6};"
+              : "=r"(acc_register[mma_m][mma_n][0]), "=r"(acc_register[mma_m][mma_n][1])
+              : "r"(A_register[mma_m][mma_k][0]), "r"(A_register[mma_m][mma_k][1]),
+                "r"(B_register[mma_k][mma_n])
+                "r"(acc_register[mma_m][mma_n][0]), "r"(acc_register[mma_m][mma_n][1])
             );
           }
         }
@@ -200,53 +185,39 @@ kernel_3(half* A,
     }
     __syncthreads();
 
+    // hopefully the loads have arrived from gmem by now, store to shared memory
+    if (block_k != num_block_tiles_k)
     {
-      constexpr unsigned int float4_cols = BK_dim / 8; // 8
-      auto swizzled_layout = composition(Swizzle<3,0,A_swizzle_bits>{}, make_layout(make_shape(BM_dim, float4_cols), make_stride(BK_dim / 8, 1)));
-      Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(A_smem.data().get()), swizzled_layout);
-      unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-      unsigned int thread_idx_y = thread_idx / float4_cols;
-      unsigned int thread_idx_x = thread_idx % float4_cols;
-      dst_float4(thread_idx_y, thread_idx_x) = A_gmem_cache_reg[0];
-      dst_float4(thread_idx_y + 32, thread_idx_x) = A_gmem_cache_reg[1];
-      dst_float4(thread_idx_y + 64, thread_idx_x) = A_gmem_cache_reg[2];
-      dst_float4(thread_idx_y + 96, thread_idx_x) = A_gmem_cache_reg[3];
-      dst_float4(thread_idx_y + 128, thread_idx_x) = A_gmem_cache_reg[4];
-      dst_float4(thread_idx_y + 160, thread_idx_x) = A_gmem_cache_reg[5];
-      dst_float4(thread_idx_y + 192, thread_idx_x) = A_gmem_cache_reg[6];
-      dst_float4(thread_idx_y + 224, thread_idx_x) = A_gmem_cache_reg[7];
-    }
-
-    {
-      constexpr unsigned int float4_cols = BN_dim / 8; // 16
-      auto swizzled_layout = composition(Swizzle<3,0,B_swizzle_bits>{}, make_layout(make_shape(BK_dim, float4_cols), make_stride(BN_dim / 8, 1)));
-      unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-      unsigned int thread_idx_y = thread_idx / float4_cols;
-      unsigned int thread_idx_x = thread_idx % float4_cols;
-      Tensor dst_float4 = make_tensor(reinterpret_cast<float4*>(B_smem.data().get()), swizzled_layout);
-      dst_float4(thread_idx_y, thread_idx_x) = B_gmem_cache_reg[0];
-      dst_float4(thread_idx_y + 16, thread_idx_x) = B_gmem_cache_reg[1];
-      dst_float4(thread_idx_y + 32, thread_idx_x) = B_gmem_cache_reg[2];
-      dst_float4(thread_idx_y + 48, thread_idx_x) = B_gmem_cache_reg[3];
+      tileMemcpySwizzleStore<BM_dim, BK_dim, NUM_THREADS, SWIZZLE_BITS_A, 8>(A_gmem_cache_reg, A_block_smem);
+      tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 4>(B_gmem_cache_reg, B_block_smem);
     }
   }
 
-  // epilogue
+  //////////////
+  // epilogue //
+  //////////////
   half alpha_ = (half)alpha;
   half beta_ = (half)beta;
   half C_register[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4];
+  
+  // calculate pointers for this warps C and D tiles
+  half* C_block_gmem = C + (block_m * BM_dim * CD_stride) + (block_n * BN_dim);
+  half* C_warp_gmem = C_block_gmem + (warp_m * WM_dim * CD_stride) + (warp_n * WN_dim);
+  half* D_block_gmem = D + (block_m * BM_dim * CD_stride) + (block_n * BN_dim);
+  half* D_warp_gmem = D_block_gmem + (warp_m * WM_dim * CD_stride) + (warp_n * WN_dim);
+
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        Tensor C_mma_tile = C_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        ldmatrix_m16n8_gmem(C_mma_tile.data(), C_register[mma_m][mma_n], N * sizeof(half));
+        half* C_mma_tile = C_warp_gmem + (mma_m * MMA_M_dim * CD_stride) + (mma_n * MMA_N_dim);
+        ldmatrix_m16n8_gmem(C_mma_tile, C_register[mma_m][mma_n], N * sizeof(half));
           
         // scale C by beta
-        acc_register[mma_m][mma_n][0] = acc_register[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
-        acc_register[mma_m][mma_n][1] = acc_register[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
-        acc_register[mma_m][mma_n][2] = acc_register[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
-        acc_register[mma_m][mma_n][3] = acc_register[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
+        acc_register_[mma_m][mma_n][0] = acc_register_[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
+        acc_register_[mma_m][mma_n][1] = acc_register_[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
+        acc_register_[mma_m][mma_n][2] = acc_register_[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
+        acc_register_[mma_m][mma_n][3] = acc_register_[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
       }
   }
 
@@ -254,13 +225,13 @@ kernel_3(half* A,
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        Tensor D_mma_tile = D_mma_tiles(make_coord(_,_), make_coord(mma_m, mma_n, warp_m, warp_n, block_m, block_n));
-        stmatrix_m16n8(D_mma_tile.data(), acc_register[mma_m][mma_n], N * sizeof(half));
+        half* D_mma_tile = D_warp_gmem + (mma_m * MMA_M_dim * CD_stride) + (mma_n * MMA_N_dim);
+        stmatrix_m16n8(D_mma_tile, acc_register_[mma_m][mma_n], N * sizeof(half));
       }
   }
 }
 
-void kernel_3_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void kernel_4_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
   constexpr unsigned int BM_dim = 256;
@@ -286,25 +257,24 @@ void kernel_3_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int WARP_SIZE = 32;
     const unsigned int BlocksM = M / BM_dim;
     const unsigned int BlocksN = N / BN_dim;
-    const unsigned int ThreadsM = WARPS_PER_BLOCK_M;
-    const unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
+    constexpr unsigned int ThreadsM = WARPS_PER_BLOCK_M;
+    constexpr unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
+    constexpr unsigned int NumThreads = ThreadsM * ThreadsN;
     const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
-    constexpr unsigned int A_swizzle_bits = int_log2(BK_dim/8);
-    constexpr unsigned int B_swizzle_bits = int_log2(BN_dim/8);
 
-    dim3 gridDim(BlocksN * BlocksM, 1);
+    dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_3<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_4<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, NumThreads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        kernel_3
+        kernel_4
         <BM_dim, BN_dim, BK_dim,
-        WM_dim, WN_dim, WK_dim, A_swizzle_bits, B_swizzle_bits>
+        WM_dim, WN_dim, WK_dim, NumThreads>
         <<<gridDim, blockDim, shmem_bytes>>>(
             device_sgemm_params.A,
             device_sgemm_params.B,
