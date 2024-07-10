@@ -4,178 +4,110 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
-// fast shmem index calculation
+// shared memory double buffering
 
+template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k>
 __device__ __forceinline__ void ldmatrix_a(
-  half* src,
-  half (&reg)[4][8][4],
+  const half* src,
+  half (&reg)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4],
   const unsigned int smem_stride
 )
 {
-  uint32_t (&reg_) [4][8][2] = reinterpret_cast<uint32_t(&)[4][8][2]>(reg);
+  static_assert(mma_tiles_per_warp_m == 4, "mma_tiles_per_warp_m must be 4");
+  static_assert(mma_tiles_per_warp_k == 4, "mma_tiles_per_warp_k must be 4");
+
+  uint32_t (&reg_) [mma_tiles_per_warp_m][mma_tiles_per_warp_k][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2]>(reg);
   unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
-  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b111000000) >> 3);
+  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b10000000) >> 4);
+  swizzled_offset = swizzled_offset ^ ((swizzled_offset & 0b1100000) >> 2);
   uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
-  
-  // 0
-  asm volatile (
+    
+    // 0
+    asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
       : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
       : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-  
-  // 1
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b110000;
+    );
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b110000;
 
-  // 2
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][2][0]), "=r"(reg_[0][2][1]), "=r"(reg_[1][2][0]), "=r"(reg_[1][2][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][2][0]), "=r"(reg_[0][2][1]), "=r"(reg_[1][2][0]), "=r"(reg_[1][2][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b10000;
 
-  // 3
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][3][0]), "=r"(reg_[0][3][1]), "=r"(reg_[1][3][0]), "=r"(reg_[1][3][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b1110000;
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[0][3][0]), "=r"(reg_[0][3][1]), "=r"(reg_[1][3][0]), "=r"(reg_[1][3][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b100000110000;
 
-  // 4
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][4][0]), "=r"(reg_[0][4][1]), "=r"(reg_[1][4][0]), "=r"(reg_[1][4][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
 
-  // 5
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][5][0]), "=r"(reg_[0][5][1]), "=r"(reg_[1][5][0]), "=r"(reg_[1][5][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b110000;
-  
-  // 6
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][6][0]), "=r"(reg_[0][6][1]), "=r"(reg_[1][6][0]), "=r"(reg_[1][6][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-
-  // 7
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][7][0]), "=r"(reg_[0][7][1]), "=r"(reg_[1][7][0]), "=r"(reg_[1][7][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b1000001110000;
-
-  // 0
-  asm volatile (
+    // 0
+    asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
       : "=r"(reg_[2][0][0]), "=r"(reg_[2][0][1]), "=r"(reg_[3][0][0]), "=r"(reg_[3][0][1])
       : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-  
-  // 1
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][1][0]), "=r"(reg_[2][1][1]), "=r"(reg_[3][1][0]), "=r"(reg_[3][1][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b110000;
+    );
+    src_addr ^= 0b10000;
+    
+    // 1
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][1][0]), "=r"(reg_[2][1][1]), "=r"(reg_[3][1][0]), "=r"(reg_[3][1][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b110000;
 
-  // 2
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][2][0]), "=r"(reg_[2][2][1]), "=r"(reg_[3][2][0]), "=r"(reg_[3][2][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
+    // 2
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][2][0]), "=r"(reg_[2][2][1]), "=r"(reg_[3][2][0]), "=r"(reg_[3][2][1])
+        : "r"(src_addr)
+    );
+    src_addr ^= 0b10000;
 
-  // 3
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][3][0]), "=r"(reg_[2][3][1]), "=r"(reg_[3][3][0]), "=r"(reg_[3][3][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b1110000;
-
-  // 4
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][4][0]), "=r"(reg_[2][4][1]), "=r"(reg_[3][4][0]), "=r"(reg_[3][4][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-
-  // 5
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][5][0]), "=r"(reg_[2][5][1]), "=r"(reg_[3][5][0]), "=r"(reg_[3][5][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b110000;
-  
-  // 6
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][6][0]), "=r"(reg_[2][6][1]), "=r"(reg_[3][6][0]), "=r"(reg_[3][6][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-
-  // 7
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][7][0]), "=r"(reg_[2][7][1]), "=r"(reg_[3][7][0]), "=r"(reg_[3][7][1])
-      : "r"(src_addr)
-  );
+    // 3
+    asm volatile (
+        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+        "{%0, %1, %2, %3}, [%4];"
+        : "=r"(reg_[2][3][0]), "=r"(reg_[2][3][1]), "=r"(reg_[3][3][0]), "=r"(reg_[3][3][1])
+        : "r"(src_addr)
+    );
 }
 
 
-
 __device__ __forceinline__ void ldmatrix_b(
-  half* src,
-  half (&reg)[8][8][2],
+  const half* src,
+  half (&reg)[4][8][2],
   const unsigned int smem_stride
 )
 {
-  uint32_t (&reg_) [8][8] = reinterpret_cast<uint32_t(&)[8][8]>(reg);
+  uint32_t (&reg_) [4][8] = reinterpret_cast<uint32_t(&)[4][8]>(reg);
   unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
   unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b1111000000) >> 4);
   uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
   // when looking at this addr in debugger, it appears that it is just the number of bytes from the start of the shared memory
 
-  // constexpr int x_thread = 0;
   asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -245,78 +177,6 @@ __device__ __forceinline__ void ldmatrix_b(
       : "=r"(reg_[0][7]), "=r"(reg_[1][7]), "=r"(reg_[2][7]), "=r"(reg_[3][7])
       : "r"(src_addr)
   );
-  src_addr ^= 0b10000001110000;
-
-  // 0
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][0]), "=r"(reg_[5][0]), "=r"(reg_[6][0]), "=r"(reg_[7][0])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-  
-  // 1
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][1]), "=r"(reg_[5][1]), "=r"(reg_[6][1]), "=r"(reg_[7][1])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b110000;
-
-  // 2
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][2]), "=r"(reg_[5][2]), "=r"(reg_[6][2]), "=r"(reg_[7][2])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-
-  // 3
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][3]), "=r"(reg_[5][3]), "=r"(reg_[6][3]), "=r"(reg_[7][3])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b1110000;
-
-  // 4
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][4]), "=r"(reg_[5][4]), "=r"(reg_[6][4]), "=r"(reg_[7][4])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-
-  // 5
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][5]), "=r"(reg_[5][5]), "=r"(reg_[6][5]), "=r"(reg_[7][5])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b110000;
-  
-  // 6
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][6]), "=r"(reg_[5][6]), "=r"(reg_[6][6]), "=r"(reg_[7][6])
-      : "r"(src_addr)
-  );
-  src_addr ^= 0b10000;
-
-  // 7
-  asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][7]), "=r"(reg_[5][7]), "=r"(reg_[6][7]), "=r"(reg_[7][7])
-      : "r"(src_addr)
-  );
 }
 
 
@@ -328,7 +188,7 @@ unsigned int WN_dim,
 unsigned int WK_dim,
 unsigned int NUM_THREADS>
 __global__ void
-kernel_5(half* A,
+kernel_8(half* A,
   half* B,
   half* C,
   half* D,
@@ -348,8 +208,8 @@ kernel_5(half* A,
   const unsigned int CD_stride = N;
 
   // calculate how many bits of shared memory indices are going to be swizzled, and create masks
-  constexpr unsigned int SWIZZLE_BITS_A = int_log2(BK_dim / 8);
   constexpr unsigned int SWIZZLE_BITS_B = int_log2(BN_dim / 8);
+  constexpr unsigned int SWIZZLE_MASK_B = 0b1110000 << SWIZZLE_BITS_B;
 
   // loop bounds, constexpr where possible allows for loop unrolling
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;
@@ -363,9 +223,10 @@ kernel_5(half* A,
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
   
+  // double buffering
   extern __shared__ half shmem[];
-  half* A_block_smem = shmem;
-  half* B_block_smem = &shmem[BM_dim * BK_dim];
+  half* A_block_smem[2] = {shmem, &shmem[BM_dim * BK_dim]};
+  half* B_block_smem[2] = {&shmem[2 * BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
 
   // declare register storage
   // ptx instructions expect uint32_t registers, where each uint32_t is 2 halfs packed together  
@@ -390,50 +251,59 @@ kernel_5(half* A,
       }
   }
 
-
   // these register arrays are used to cache values pre-fetched from global memory during the inner loop of the kernel
   // the code is nicer if we hard code it for these tile dimensions and number of threads
   // since we performing this copy with float4 pointers, for these tile dimensions it works out to be 8 float4s for A and 4 float4s for B
   static_assert(BM_dim == 256);
   static_assert(BN_dim == 128);
-  static_assert(BK_dim == 64);
+  static_assert(BK_dim == 32);
   static_assert(NUM_THREADS == 256);
-  float4 A_gmem_cache_reg[8];
-  float4 B_gmem_cache_reg[4];
-
-
+  float4 A_gmem_cache_reg[4];
+  float4 B_gmem_cache_reg[2];
+    
   // prefetch the first block tile of A,B into shared memory
   half* A_block_gmem = A + (block_m * BM_dim * A_stride);
   half* B_block_gmem = B + (block_n * BN_dim);
-  tileMemcpySwizzle<BM_dim, BK_dim, NUM_THREADS, SWIZZLE_BITS_A>(A_block_gmem, A_block_smem, K);
-  tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem, N);
-  __syncthreads();
+  tileMemcpySwizzleA<BM_dim, NUM_THREADS>(A_block_gmem, A_block_smem[0], K);
+  tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem[0], N);
+  // __syncthreads();
 
+  // construct const pointers to warp tiles for use inside the inner loop
+  // const half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
+  // const half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
+  const half* A_warp_tile[2] = {A_block_smem[0] + (warp_m * WM_dim * BK_dim), A_block_smem[1] + (warp_m * WM_dim * BK_dim)};
+  const half* B_warp_tile[2] = {B_block_smem[0] + (warp_n * WN_dim), B_block_smem[1] + (warp_n * WN_dim)};
+  // const uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
+  // const uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
+  // const uint32_t A_warp_tile_byte_offset[2] = {cvta_to_shared_u32(A_smem_[0] + (warp_m * WM_dim) * BK_dim), cvta_to_shared_u32(A_smem_[1] + (warp_m * WM_dim) * BK_dim)};
+  // const uint32_t B_warp_tile_byte_offset[2] = {cvta_to_shared_u32(B_smem_[0] + (warp_n * WN_dim)), cvta_to_shared_u32(B_smem_[1] + (warp_n * WN_dim))};
+
+  unsigned int read_buffer_ind = 0;
+  unsigned int write_buffer_ind = 1;
 
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
+    __syncthreads();
+
     if (block_k != num_block_tiles_k)
     {
       half* A_block_gmem = A + (block_m * BM_dim * A_stride) + (block_k * BK_dim);
       half* B_block_gmem = B + (block_k * BK_dim * B_stride) + (block_n * BN_dim);
-      tileMemcpyLoad<BM_dim, BK_dim, NUM_THREADS, 8>(A_block_gmem, A_gmem_cache_reg, K);
-      tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 4>(B_block_gmem, B_gmem_cache_reg, N);
+      tileMemcpyLoad<BM_dim, BK_dim, NUM_THREADS, 4>(A_block_gmem, A_gmem_cache_reg, K);
+      tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 2>(B_block_gmem, B_gmem_cache_reg, N);
     }
 
-    __syncthreads();
-      
-    // preload tiles of a into registers
-    half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
-    half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
-
-    ldmatrix_a(A_warp_tile, A_register_, BK_dim);
-    ldmatrix_b(B_warp_tile, B_register_, BN_dim);
+    ldmatrix_a<mma_tiles_per_warp_m, mma_tiles_per_warp_k>(A_warp_tile[read_buffer_ind], A_register_, BK_dim);
+    ldmatrix_b(B_warp_tile[read_buffer_ind], B_register_, BN_dim);
 
     // outer product between mma tiles
+    #pragma unroll
     for (unsigned int mma_k = 0; mma_k < mma_tiles_per_warp_k; mma_k++)
     {
+      #pragma unroll
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
+        #pragma unroll
         for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
         {
           asm volatile (
@@ -451,14 +321,15 @@ kernel_5(half* A,
       }
     }
 
-    __syncthreads();
-
-    // hopefully the loads have arrived from gmem by now, store to shared memory
     if (block_k != num_block_tiles_k)
     {
-      tileMemcpySwizzleStore<BM_dim, BK_dim, NUM_THREADS, SWIZZLE_BITS_A, 8>(A_gmem_cache_reg, A_block_smem);
-      tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 4>(B_gmem_cache_reg, B_block_smem);
+      tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem[write_buffer_ind]);
+      tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 2>(B_gmem_cache_reg, B_block_smem[write_buffer_ind]);
     }
+
+    // flip read/write buffer indices
+    read_buffer_ind ^= 1;
+    write_buffer_ind ^= 1;
   }
 
   //////////////
@@ -499,12 +370,12 @@ kernel_5(half* A,
   }
 }
 
-void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void kernel_8_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
   constexpr unsigned int BM_dim = 256;
   constexpr unsigned int BN_dim = 128;
-  constexpr unsigned int BK_dim = 64;
+  constexpr unsigned int BK_dim = 32;
   
   constexpr unsigned int WARPS_PER_BLOCK_M = 4;
   constexpr unsigned int WARPS_PER_BLOCK_N = 2;
@@ -528,19 +399,19 @@ void kernel_5_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int ThreadsM = WARPS_PER_BLOCK_M;
     constexpr unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
     constexpr unsigned int NumThreads = ThreadsM * ThreadsN;
-    const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+    const unsigned int shmem_bytes = 2 * (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_5<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, NumThreads>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_8<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, NumThreads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        kernel_5
+        kernel_8
         <BM_dim, BN_dim, BK_dim,
         WM_dim, WN_dim, WK_dim, NumThreads>
         <<<gridDim, blockDim, shmem_bytes>>>(

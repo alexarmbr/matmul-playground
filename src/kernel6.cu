@@ -4,6 +4,8 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
+// smaller K dimension
+
 
 template <unsigned int BM_dim,
 unsigned int BN_dim,

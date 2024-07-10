@@ -5,6 +5,8 @@
 #include "structs_n_stuff.cuh"
 
 
+// async copy from global memory to shared memory
+
 template <unsigned int BM_dim,
 unsigned int BN_dim,
 unsigned int BK_dim,
