@@ -414,8 +414,8 @@ kernel_5(half* A,
     {
       half* A_block_gmem = A + (block_m * BM_dim * A_stride) + (block_k * BK_dim);
       half* B_block_gmem = B + (block_k * BK_dim * B_stride) + (block_n * BN_dim);
-      tileMemcpySwizzleLoad<BM_dim, BK_dim, NUM_THREADS, SWIZZLE_BITS_A, 8>(A_block_gmem, A_gmem_cache_reg, K);
-      tileMemcpySwizzleLoad<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 4>(B_block_gmem, B_gmem_cache_reg, N);
+      tileMemcpyLoad<BM_dim, BK_dim, NUM_THREADS, 8>(A_block_gmem, A_gmem_cache_reg, K);
+      tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 4>(B_block_gmem, B_gmem_cache_reg, N);
     }
 
     __syncthreads();
