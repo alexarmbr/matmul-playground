@@ -4,7 +4,7 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
-// shared memory double buffering
+// shared memory double buffering / performs worse
 
 template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k>
 __device__ __forceinline__ void ldmatrix_a(

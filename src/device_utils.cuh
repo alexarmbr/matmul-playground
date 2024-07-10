@@ -284,6 +284,57 @@ __device__ __forceinline__ void tileMemcpySwizzleStore(
     }
 }
 
+// same as above but without the swizzle
+template<unsigned int TILE_ROWS,
+unsigned int TILE_COLS,
+unsigned int NUM_THREADS,
+unsigned int ELEMENTS_PER_THREAD>
+__device__ __forceinline__ void tileMemcpyStore(
+    float4 src_reg[ELEMENTS_PER_THREAD],
+    half* dst,
+    unsigned int dst_stride_float4
+)
+{
+    // reinterpret input/output as float4
+    float4* dst_float4 = reinterpret_cast<float4*>(dst);
+
+    // # of threads is multiple of # of columns in the tile
+    constexpr unsigned int TILE_COLS_VECTORIZED = TILE_COLS / 8;
+    static_assert(NUM_THREADS % TILE_COLS_VECTORIZED == 0);
+    
+    // flatten out 2d grid of threads into in order of increasing threadIdx.x
+    const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+
+    // assign each thread a row/column in the tile, calculate how many iterations we need
+    // to cover the whole tile
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_VECTORIZED;
+    constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
+    unsigned int thread_row = thread_idx / TILE_COLS_VECTORIZED;
+    const unsigned int thread_col = thread_idx % TILE_COLS_VECTORIZED;
+    
+    // compile time check that we provided the right amount of registers for storage
+    static_assert(ELEMENTS_PER_THREAD == NUM_ITERS);
+    
+    #pragma unroll
+    for (unsigned int i = 0; i < NUM_ITERS; i++)
+    {
+        // apply swizzle to the dst index
+        unsigned int dst_index = thread_row * dst_stride_float4 + thread_col;
+        dst_float4[dst_index] = src_reg[i];
+        thread_row += ROW_STEP;
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
 
 // this is a special case of the above for when TILE_COLS == 32
 template<unsigned int TILE_ROWS,
@@ -457,88 +508,72 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
     reg_[1] = src_ptr[fragment_row * src_stride_bytes + fragment_col];
 }
 
-__device__ __forceinline__ void ldmatrix_m16n16_gmem(
-    half* src,
-    half (&reg)[8],
-    const unsigned int src_stride_bytes
-)
-{
-    const unsigned int laneIdx = threadIdx.x % 32;
-    float4 &reg_= reinterpret_cast<float4&>(reg);
-    const unsigned int src_stride_float4 = src_stride_bytes / sizeof(float4);
-    const float4* src_ptr = reinterpret_cast<float4*>(src);
-    // const float4* thread_ptr = src_ptr + (thread_shmem_row_map[laneIdx] * src_stride_float4) + thread_shmem_col_map[laneIdx];
-    const float4* thread_ptr = src_ptr + (laneIdx * src_stride_float4) + (laneIdx / 16);
-    reg_ = *thread_ptr;
-}
-
-
-__device__ __forceinline__ void stmatrix_m16n16_gmem(
-    half* dst,
-    half (&reg)[8],
-    const unsigned int dst_stride_bytes
-)
-{
-    const unsigned int laneIdx = threadIdx.x % 32;
-    float4 &reg_= reinterpret_cast<float4&>(reg);
-    const unsigned int dst_stride_float4 = dst_stride_bytes / sizeof(float4);
-    const float4* dst_ptr = reinterpret_cast<float4*>(dst);
-    // const float4* thread_ptr = dst_ptr + (thread_shmem_row_map[laneIdx] * dst_stride_float4) + thread_shmem_col_map[laneIdx];
-    const float4* thread_ptr = dst_ptr + (laneIdx * dst_stride_float4) + (laneIdx / 16);
-    reg_ = *thread_ptr;
-}
 
 
 
-template <unsigned int BM_dim, unsigned int BK_dim>
-__device__ void tileMemcpySwizzleUnrolled_A(half* src, half* dst, const unsigned int src_stride_half)
-{
-    float4* src_float4 = reinterpret_cast<float4*>(src);
-    float4* dst_float4 = reinterpret_cast<float4*>(dst);
-    int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-    int num_threads = blockDim.x * blockDim.y;
-    constexpr unsigned int BK_dim_float4 = BK_dim / 8;
-    constexpr unsigned int TILE_SIZE = BM_dim * BK_dim_float4;
-    const unsigned int src_stride_float4 = src_stride_half / 8;
 
 
-    #pragma unroll 8
-    while (thread_idx < TILE_SIZE)
-    {
-        const unsigned int thread_idx_y = thread_idx / BK_dim_float4;
-        const unsigned int thread_idx_x = thread_idx % BK_dim_float4;
-        const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
-        unsigned int dst_ind = thread_idx_y * BK_dim_float4 + thread_idx_x;
-        dst_ind = dst_ind ^ ((dst_ind & 0b10000) >> 4);
-        dst_ind = dst_ind ^ ((dst_ind & 0b1100) >> 2);
-        dst_float4[dst_ind] = src_float4[src_ind];
-        thread_idx += num_threads;
-    }
-}
 
-template <unsigned int BK_dim, unsigned int BN_dim>
-__device__ void tileMemcpySwizzleUnrolled_B(half* src, half* dst, const unsigned int src_stride_half)
-{
-    float4* src_float4 = reinterpret_cast<float4*>(src);
-    float4* dst_float4 = reinterpret_cast<float4*>(dst);
-    int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-    int num_threads = blockDim.x * blockDim.y;
-    constexpr unsigned int BN_dim_float4 = BN_dim / 8;
-    constexpr unsigned int TILE_SIZE = BK_dim * BN_dim_float4;
-    const unsigned int src_stride_float4 = src_stride_half / 8;
 
-    #pragma unroll 8
-    while (thread_idx < TILE_SIZE)
-    {
-        const unsigned int thread_idx_y = thread_idx / BN_dim_float4;
-        const unsigned int thread_idx_x = thread_idx % BN_dim_float4;
-        const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
-        unsigned int dst_ind = thread_idx_y * BN_dim_float4 + thread_idx_x;
-        dst_ind = dst_ind ^ ((dst_ind & 0b1110000) >> 4);
-        dst_float4[dst_ind] = src_float4[src_ind];
-        thread_idx += num_threads;
-    }
-}
+
+
+
+
+
+
+
+
+
+
+// template <unsigned int BM_dim, unsigned int BK_dim>
+// __device__ void tileMemcpySwizzleUnrolled_A(half* src, half* dst, const unsigned int src_stride_half)
+// {
+//     float4* src_float4 = reinterpret_cast<float4*>(src);
+//     float4* dst_float4 = reinterpret_cast<float4*>(dst);
+//     int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+//     int num_threads = blockDim.x * blockDim.y;
+//     constexpr unsigned int BK_dim_float4 = BK_dim / 8;
+//     constexpr unsigned int TILE_SIZE = BM_dim * BK_dim_float4;
+//     const unsigned int src_stride_float4 = src_stride_half / 8;
+
+
+//     #pragma unroll 8
+//     while (thread_idx < TILE_SIZE)
+//     {
+//         const unsigned int thread_idx_y = thread_idx / BK_dim_float4;
+//         const unsigned int thread_idx_x = thread_idx % BK_dim_float4;
+//         const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
+//         unsigned int dst_ind = thread_idx_y * BK_dim_float4 + thread_idx_x;
+//         dst_ind = dst_ind ^ ((dst_ind & 0b10000) >> 4);
+//         dst_ind = dst_ind ^ ((dst_ind & 0b1100) >> 2);
+//         dst_float4[dst_ind] = src_float4[src_ind];
+//         thread_idx += num_threads;
+//     }
+// }
+
+// template <unsigned int BK_dim, unsigned int BN_dim>
+// __device__ void tileMemcpySwizzleUnrolled_B(half* src, half* dst, const unsigned int src_stride_half)
+// {
+//     float4* src_float4 = reinterpret_cast<float4*>(src);
+//     float4* dst_float4 = reinterpret_cast<float4*>(dst);
+//     int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+//     int num_threads = blockDim.x * blockDim.y;
+//     constexpr unsigned int BN_dim_float4 = BN_dim / 8;
+//     constexpr unsigned int TILE_SIZE = BK_dim * BN_dim_float4;
+//     const unsigned int src_stride_float4 = src_stride_half / 8;
+
+//     #pragma unroll 8
+//     while (thread_idx < TILE_SIZE)
+//     {
+//         const unsigned int thread_idx_y = thread_idx / BN_dim_float4;
+//         const unsigned int thread_idx_x = thread_idx % BN_dim_float4;
+//         const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
+//         unsigned int dst_ind = thread_idx_y * BN_dim_float4 + thread_idx_x;
+//         dst_ind = dst_ind ^ ((dst_ind & 0b1110000) >> 4);
+//         dst_float4[dst_ind] = src_float4[src_ind];
+//         thread_idx += num_threads;
+//     }
+// }
 
 
 // useful functions
