@@ -15,7 +15,7 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 # file(GLOB SOURCES "src/kernel*.cu")
-set(SOURCES src/kernel9.cu)
+set(SOURCES src/kernel9.cu src/kernel8.cu src/kernel7.cu)
 
 add_library(kernels ${SOURCES})
 target_compile_options(kernels PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>)

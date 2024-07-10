@@ -274,8 +274,7 @@ kernel_8(half* A,
   // __syncthreads();
 
   // construct const pointers to warp tiles for use inside the inner loop
-  half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
-  half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
+
   // const half* A_warp_tile[2] = {A_block_smem[0] + (warp_m * WM_dim * BK_dim), A_block_smem[1] + (warp_m * WM_dim * BK_dim)};
   // const half* B_warp_tile[2] = {B_block_smem[0] + (warp_n * WN_dim), B_block_smem[1] + (warp_n * WN_dim)};
   // const uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
@@ -288,6 +287,7 @@ kernel_8(half* A,
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
 
+
     if (block_k != num_block_tiles_k)
     {
       half* A_block_gmem = A + (block_m * BM_dim * A_stride) + (block_k * BK_dim);
@@ -295,7 +295,11 @@ kernel_8(half* A,
       tileMemcpyLoad<BM_dim, BK_dim, NUM_THREADS, 4>(A_block_gmem, A_gmem_cache_reg, K);
       tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 2>(B_block_gmem, B_gmem_cache_reg, N);
     }
+    __syncthreads();
 
+
+    half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
+    half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
     ldmatrix_a<mma_tiles_per_warp_m, mma_tiles_per_warp_k>(A_warp_tile, A_register_, BK_dim);
     ldmatrix_b(B_warp_tile, B_register_, BN_dim);
 
@@ -323,19 +327,15 @@ kernel_8(half* A,
         }
       }
     }
-    __syncthreads();
-
 
     if (block_k != num_block_tiles_k)
     {
+      A_block_smem = (A_block_smem + offset_direction * BUFFER_SIZE);
+      B_block_smem = (B_block_smem + offset_direction * BUFFER_SIZE);
+      offset_direction = -offset_direction;
       tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem);
       tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 2>(B_gmem_cache_reg, B_block_smem);
     }
-
-    A_block_smem = (A_block_smem + offset_direction * BUFFER_SIZE);
-    B_block_smem = (B_block_smem + offset_direction * BUFFER_SIZE);
-    offset_direction = -offset_direction;
-
   }
 
   //////////////
