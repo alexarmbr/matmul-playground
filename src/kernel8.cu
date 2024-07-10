@@ -225,8 +225,13 @@ kernel_8(half* A,
   
   // double buffering
   extern __shared__ half shmem[];
-  half* A_block_smem[2] = {shmem, &shmem[BM_dim * BK_dim]};
-  half* B_block_smem[2] = {&shmem[2 * BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
+  // half* A_block_smem[2] = {shmem, &shmem[BM_dim * BK_dim]};
+  // half* B_block_smem[2] = {&shmem[2 * BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
+  // half* A_block_smem[2] = {shmem, &shmem[BM_dim * BK_dim + BK_dim * BN_dim]};
+  // half* B_block_smem[2] = {&shmem[BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
+  half* A_block_smem = shmem;
+  half* B_block_smem = &shmem[BM_dim * BK_dim];
+  constexpr unsigned int BUFFER_SIZE = BM_dim * BK_dim + BK_dim * BN_dim;
 
   // declare register storage
   // ptx instructions expect uint32_t registers, where each uint32_t is 2 halfs packed together  
@@ -264,26 +269,24 @@ kernel_8(half* A,
   // prefetch the first block tile of A,B into shared memory
   half* A_block_gmem = A + (block_m * BM_dim * A_stride);
   half* B_block_gmem = B + (block_n * BN_dim);
-  tileMemcpySwizzleA<BM_dim, NUM_THREADS>(A_block_gmem, A_block_smem[0], K);
-  tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem[0], N);
+  tileMemcpySwizzleA<BM_dim, NUM_THREADS>(A_block_gmem, A_block_smem, K);
+  tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem, N);
   // __syncthreads();
 
   // construct const pointers to warp tiles for use inside the inner loop
-  // const half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
-  // const half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
-  const half* A_warp_tile[2] = {A_block_smem[0] + (warp_m * WM_dim * BK_dim), A_block_smem[1] + (warp_m * WM_dim * BK_dim)};
-  const half* B_warp_tile[2] = {B_block_smem[0] + (warp_n * WN_dim), B_block_smem[1] + (warp_n * WN_dim)};
+  half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
+  half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
+  // const half* A_warp_tile[2] = {A_block_smem[0] + (warp_m * WM_dim * BK_dim), A_block_smem[1] + (warp_m * WM_dim * BK_dim)};
+  // const half* B_warp_tile[2] = {B_block_smem[0] + (warp_n * WN_dim), B_block_smem[1] + (warp_n * WN_dim)};
   // const uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
   // const uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
   // const uint32_t A_warp_tile_byte_offset[2] = {cvta_to_shared_u32(A_smem_[0] + (warp_m * WM_dim) * BK_dim), cvta_to_shared_u32(A_smem_[1] + (warp_m * WM_dim) * BK_dim)};
   // const uint32_t B_warp_tile_byte_offset[2] = {cvta_to_shared_u32(B_smem_[0] + (warp_n * WN_dim)), cvta_to_shared_u32(B_smem_[1] + (warp_n * WN_dim))};
 
-  unsigned int read_buffer_ind = 0;
-  unsigned int write_buffer_ind = 1;
+  int offset_direction = 1;
 
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
-    __syncthreads();
 
     if (block_k != num_block_tiles_k)
     {
@@ -293,8 +296,8 @@ kernel_8(half* A,
       tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 2>(B_block_gmem, B_gmem_cache_reg, N);
     }
 
-    ldmatrix_a<mma_tiles_per_warp_m, mma_tiles_per_warp_k>(A_warp_tile[read_buffer_ind], A_register_, BK_dim);
-    ldmatrix_b(B_warp_tile[read_buffer_ind], B_register_, BN_dim);
+    ldmatrix_a<mma_tiles_per_warp_m, mma_tiles_per_warp_k>(A_warp_tile, A_register_, BK_dim);
+    ldmatrix_b(B_warp_tile, B_register_, BN_dim);
 
     // outer product between mma tiles
     #pragma unroll
@@ -320,16 +323,19 @@ kernel_8(half* A,
         }
       }
     }
+    __syncthreads();
+
 
     if (block_k != num_block_tiles_k)
     {
-      tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem[write_buffer_ind]);
-      tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 2>(B_gmem_cache_reg, B_block_smem[write_buffer_ind]);
+      tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem);
+      tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 2>(B_gmem_cache_reg, B_block_smem);
     }
 
-    // flip read/write buffer indices
-    read_buffer_ind ^= 1;
-    write_buffer_ind ^= 1;
+    A_block_smem = (A_block_smem + offset_direction * BUFFER_SIZE);
+    B_block_smem = (B_block_smem + offset_direction * BUFFER_SIZE);
+    offset_direction = -offset_direction;
+
   }
 
   //////////////

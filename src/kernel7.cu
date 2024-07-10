@@ -267,7 +267,6 @@ kernel_7(half* A,
   half* B_block_gmem = B + (block_n * BN_dim);
   tileMemcpySwizzleA<BM_dim, NUM_THREADS>(A_block_gmem, A_block_smem, K);
   tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem, N);
-  __syncthreads();
 
   // construct const pointers to warp tiles for use inside the inner loop
   const half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
@@ -277,6 +276,8 @@ kernel_7(half* A,
 
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
+    __syncthreads();
+
     if (block_k != num_block_tiles_k)
     {
       half* A_block_gmem = A + (block_m * BM_dim * A_stride) + (block_k * BK_dim);
@@ -284,8 +285,6 @@ kernel_7(half* A,
       tileMemcpyLoad<BM_dim, BK_dim, NUM_THREADS, 4>(A_block_gmem, A_gmem_cache_reg, K);
       tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 2>(B_block_gmem, B_gmem_cache_reg, N);
     }
-
-    __syncthreads();
 
     ldmatrix_a<mma_tiles_per_warp_m, mma_tiles_per_warp_k>(A_warp_tile, A_register_, BK_dim);
 
