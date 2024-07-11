@@ -179,7 +179,6 @@ __device__ __forceinline__ void ldmatrix_b(
   );
 }
 
-
 template <unsigned int BM_dim,
 unsigned int BN_dim,
 unsigned int BK_dim,

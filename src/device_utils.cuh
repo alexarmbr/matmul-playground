@@ -325,17 +325,6 @@ __device__ __forceinline__ void tileMemcpyStore(
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
 // this is a special case of the above for when TILE_COLS == 32
 template<unsigned int TILE_ROWS,
 unsigned int NUM_THREADS,
@@ -383,7 +372,9 @@ __device__ __forceinline__ void tileMemcpySwizzleStoreA(
     }
 }
 
-
+///////////////////////////////////////////////////////////
+// some wrappers around PTX instructions for convenience //
+///////////////////////////////////////////////////////////
 
 __device__ __forceinline__ uint32_t cvta_to_shared_u32(const void *pointer) {
     uint32_t address;
@@ -466,8 +457,17 @@ __device__ __forceinline__ void mma_sync_m16n8k8(
     );
 }
 
+
+////////////////////////////////////////////
+// some functions used in kernel epilogue //
+////////////////////////////////////////////
+
+
+
+
 // the stmatrix ptx instruction works for sm_90 and above
 // this is a workaround
+// this is innefficient, access pattern results in bad coalescing
 __device__ __forceinline__ void stmatrix_m16n8(
     half* dst,
     half (&reg)[4],
@@ -487,8 +487,9 @@ __device__ __forceinline__ void stmatrix_m16n8(
     dst_ptr[fragment_row * dst_stride_bytes + fragment_col] = reg_[1];
 }
 
-// the stmatrix ptx instruction works for sm_90 and above
-// this is a workaround
+
+// loads an MMA tile directly from global memory
+// this is innefficient, access pattern results in bad coalescing
 __device__ __forceinline__ void ldmatrix_m16n8_gmem(
     half* src,
     half (&reg)[4],
@@ -509,6 +510,43 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
 }
 
 
+// this is more efficient, stores data in a swizzled
+// pattern to shared memory
+template <unsigned int BM_dim,
+unsigned int BN_dim,
+unsigned int mma_tiles_per_warp_m,
+unsigned int mma_tiles_per_warp_n>
+__device__ __forceinline__ void stmatrix_m16n8_swizzle(
+    half (&src)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4],
+    half* dst
+)
+{
+    constexpr unsigned int MMA_M_dim = 8;
+    constexpr unsigned int MMA_N_dim = 4;
+    
+    constexpr unsigned int BN_dim_ = BN_dim / 2;
+    uint32_t (&src_)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2]>(src);
+    uint32_t* dst_ = reinterpret_cast<uint32_t*>(dst);
+    
+    const unsigned int warp_thread_id = threadIdx.x % 32;
+    const unsigned int thread_row = warp_thread_id / 4;
+    const unsigned int thread_col = warp_thread_id % 4;
+    
+    #pragma unroll
+    for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+    {
+        #pragma unroll
+        for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+        {
+            // byte offset to the top left of the mma tile
+            const unsigned int mma_tile_offset = ((mma_m * MMA_M_dim * BN_dim_) + (mma_n * MMA_N_dim));
+            const unsigned int thread_offset = mma_tile_offset + (thread_row * BN_dim) + thread_col;
+            const unsigned int swizzled_thread_offset = thread_offset ^ ((thread_offset & 0b11100000) >> 3);
+            dst_[swizzled_thread_offset] = src_[mma_m][mma_n][0];
+            dst_[swizzled_thread_offset + MMA_M_dim * BN_dim_] = src_[mma_m][mma_n][1];
+        }
+    }
+}
 
 
 

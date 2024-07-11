@@ -4,9 +4,7 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
-// smaller K dimension + fast index calculation
-// kernel 5/6 optimizations combined
-
+// shared memory double buffering / performs worse
 
 template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k>
 __device__ __forceinline__ void ldmatrix_a(
@@ -225,9 +223,15 @@ kernel_9(half* A,
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
   
+  // double buffering
   extern __shared__ half shmem[];
+  // half* A_block_smem[2] = {shmem, &shmem[BM_dim * BK_dim]};
+  // half* B_block_smem[2] = {&shmem[2 * BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
+  // half* A_block_smem[2] = {shmem, &shmem[BM_dim * BK_dim + BK_dim * BN_dim]};
+  // half* B_block_smem[2] = {&shmem[BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
   half* A_block_smem = shmem;
   half* B_block_smem = &shmem[BM_dim * BK_dim];
+  constexpr unsigned int BUFFER_SIZE = BM_dim * BK_dim + BK_dim * BN_dim;
 
   // declare register storage
   // ptx instructions expect uint32_t registers, where each uint32_t is 2 halfs packed together  
@@ -267,16 +271,22 @@ kernel_9(half* A,
   half* B_block_gmem = B + (block_n * BN_dim);
   tileMemcpySwizzleA<BM_dim, NUM_THREADS>(A_block_gmem, A_block_smem, K);
   tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem, N);
+  // __syncthreads();
 
   // construct const pointers to warp tiles for use inside the inner loop
-  const half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
-  const half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
-  const uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
-  const uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
+
+  // const half* A_warp_tile[2] = {A_block_smem[0] + (warp_m * WM_dim * BK_dim), A_block_smem[1] + (warp_m * WM_dim * BK_dim)};
+  // const half* B_warp_tile[2] = {B_block_smem[0] + (warp_n * WN_dim), B_block_smem[1] + (warp_n * WN_dim)};
+  // const uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
+  // const uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
+  // const uint32_t A_warp_tile_byte_offset[2] = {cvta_to_shared_u32(A_smem_[0] + (warp_m * WM_dim) * BK_dim), cvta_to_shared_u32(A_smem_[1] + (warp_m * WM_dim) * BK_dim)};
+  // const uint32_t B_warp_tile_byte_offset[2] = {cvta_to_shared_u32(B_smem_[0] + (warp_n * WN_dim)), cvta_to_shared_u32(B_smem_[1] + (warp_n * WN_dim))};
+
+  int offset_direction = 1;
 
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
-    __syncthreads();
+
 
     if (block_k != num_block_tiles_k)
     {
@@ -285,9 +295,12 @@ kernel_9(half* A,
       tileMemcpyLoad<BM_dim, BK_dim, NUM_THREADS, 4>(A_block_gmem, A_gmem_cache_reg, K);
       tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 2>(B_block_gmem, B_gmem_cache_reg, N);
     }
+    __syncthreads();
 
+
+    half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
+    half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
     ldmatrix_a<mma_tiles_per_warp_m, mma_tiles_per_warp_k>(A_warp_tile, A_register_, BK_dim);
-
     ldmatrix_b(B_warp_tile, B_register_, BN_dim);
 
     // outer product between mma tiles
@@ -314,14 +327,17 @@ kernel_9(half* A,
         }
       }
     }
-    __syncthreads();
 
     if (block_k != num_block_tiles_k)
     {
+      A_block_smem = (A_block_smem + offset_direction * BUFFER_SIZE);
+      B_block_smem = (B_block_smem + offset_direction * BUFFER_SIZE);
+      offset_direction = -offset_direction;
       tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem);
       tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 2>(B_gmem_cache_reg, B_block_smem);
     }
   }
+
 
   //////////////
   // epilogue //
@@ -329,8 +345,6 @@ kernel_9(half* A,
   half alpha_ = (half)alpha;
   half beta_ = (half)beta;
 
-  // half C_register_[128];
-  // float4 (&C_register) [16] = reinterpret_cast<float4(&)[16]>(C_register_);
   float4 C_register[16];
   unsigned int (&C_register_) [64] = reinterpret_cast<unsigned int(&)[64]>(C_register);
   
@@ -339,30 +353,44 @@ kernel_9(half* A,
   half* C_warp_gmem = C_block_gmem + (warp_m * WM_dim * CD_stride) + (warp_n * WN_dim);
   half* D_block_gmem = D + (block_m * BM_dim * CD_stride) + (block_n * BN_dim);
   half* D_warp_gmem = D_block_gmem + (warp_m * WM_dim * CD_stride) + (warp_n * WN_dim);
-  tileMemcpyLoad<WM_dim, WN_dim, 32, 16>(C_warp_gmem, C_register, N);
   
-  const unsigned int warp_thread_id = threadIdx.x % 32;
-  for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-  {
-      for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-      {
-        const unsigned int send_thread_id = (((warp_thread_id  % 16) / 4) * 8) + mma_n;
-        const unsigned int send_register_index = warp_thread_id % 4;
-        uint32_t c01_ = __shfl_sync(0xffffffff, C_register_[send_register_index], send_thread_id);   
-        uint32_t c23_ = __shfl_sync(0xffffffff, C_register_[send_register_index] + 4, send_thread_id);
-        
-        half (&c01)[2] = reinterpret_cast<half(&)[2]>(c01_);
-        half (&c23)[2] = reinterpret_cast<half(&)[2]>(c23_);
-        
-        acc_register_[mma_m][mma_n][0] = acc_register_[mma_m][mma_n][0] * alpha_ + c01[0];
-        acc_register_[mma_m][mma_n][1] = acc_register_[mma_m][mma_n][1] * alpha_ + c01[1];
-        acc_register_[mma_m][mma_n][2] = acc_register_[mma_m][mma_n][2] * alpha_ + c23[0];
-        acc_register_[mma_m][mma_n][3] = acc_register_[mma_m][mma_n][3] * alpha_ + c23[1];
-      }
-  }
+  half* acc_warp_smem = shmem + (warp_m * WM_dim * BN_dim) + (warp_n * WN_dim);
+  
+  
+  tileMemcpyLoad<WM_dim, WN_dim, 32, 16>(C_warp_gmem, C_register, N);
+  __syncthreads();
+  stmatrix_m16n8_swizzle<BM_dim, BN_dim, mma_tiles_per_warp_m, mma_tiles_per_warp_n>(acc_register_, shmem);
 
-  float4 (&acc_register_tmp_)[16] = reinterpret_cast<float4(&)[16]>(acc_register);
-  tileMemcpyStore<WM_dim, WN_dim, 32, 16>(acc_register_tmp_, D_warp_gmem, N/8);
+  // since main loop is now over, we can write our accumulator values to shared memory
+  // this enables us to write results to shared memory in an efficient/vectorized striped
+  // access pattern. Each thread individually writing its MMA tiles directly to gmem
+  // would result in bad coalescing
+  
+
+
+  // for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+  // {
+  //     for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+  //     {
+  //       half* C_mma_tile = C_warp_gmem + (mma_m * MMA_M_dim * CD_stride) + (mma_n * MMA_N_dim);
+  //       ldmatrix_m16n8_gmem(C_mma_tile, C_register[mma_m][mma_n], N * sizeof(half));
+          
+  //       // scale C by beta
+  //       acc_register_[mma_m][mma_n][0] = acc_register_[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
+  //       acc_register_[mma_m][mma_n][1] = acc_register_[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
+  //       acc_register_[mma_m][mma_n][2] = acc_register_[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
+  //       acc_register_[mma_m][mma_n][3] = acc_register_[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
+  //     }
+  // }
+
+  // for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+  // {
+  //     for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+  //     {
+  //       half* D_mma_tile = D_warp_gmem + (mma_m * MMA_M_dim * CD_stride) + (mma_n * MMA_N_dim);
+  //       stmatrix_m16n8(D_mma_tile, acc_register_[mma_m][mma_n], N * sizeof(half));
+  //     }
+  // }
 }
 
 void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
@@ -394,7 +422,7 @@ void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int ThreadsM = WARPS_PER_BLOCK_M;
     constexpr unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
     constexpr unsigned int NumThreads = ThreadsM * ThreadsN;
-    const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+    const unsigned int shmem_bytes = 65536; // this is the max
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
