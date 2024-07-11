@@ -329,8 +329,10 @@ kernel_9(half* A,
   half alpha_ = (half)alpha;
   half beta_ = (half)beta;
 
-  half C_register_[128];
-  float4 (&C_register) [16] = reinterpret_cast<float4(&)[16]>(C_register_);
+  // half C_register_[128];
+  // float4 (&C_register) [16] = reinterpret_cast<float4(&)[16]>(C_register_);
+  float4 C_register[16];
+  unsigned int (&C_register_) [64] = reinterpret_cast<unsigned int(&)[64]>(C_register);
   
   // calculate pointers for this warps C and D tiles
   half* C_block_gmem = C + (block_m * BM_dim * CD_stride) + (block_n * BN_dim);
@@ -338,17 +340,24 @@ kernel_9(half* A,
   half* D_block_gmem = D + (block_m * BM_dim * CD_stride) + (block_n * BN_dim);
   half* D_warp_gmem = D_block_gmem + (warp_m * WM_dim * CD_stride) + (warp_n * WN_dim);
   tileMemcpyLoad<WM_dim, WN_dim, 32, 16>(C_warp_gmem, C_register, N);
-
+  
+  const unsigned int warp_thread_id = threadIdx.x % 32;
   for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
   {
       for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
       {
-        // scale C by beta
-        unsigned int C_index = mma_m * MMA_M_dim + mma_n * MMA_N_dim;
-        acc_register_[mma_m][mma_n][0] = acc_register_[mma_m][mma_n][0] * alpha_ + C_register_[C_index];
-        acc_register_[mma_m][mma_n][1] = acc_register_[mma_m][mma_n][1] * alpha_ + C_register_[C_index + 1];
-        acc_register_[mma_m][mma_n][2] = acc_register_[mma_m][mma_n][2] * alpha_ + C_register_[C_index + 2];
-        acc_register_[mma_m][mma_n][3] = acc_register_[mma_m][mma_n][3] * alpha_ + C_register_[C_index + 3];
+        const unsigned int send_thread_id = (((warp_thread_id  % 16) / 4) * 8) + mma_n;
+        const unsigned int send_register_index = warp_thread_id % 4;
+        uint32_t c01_ = __shfl_sync(0xffffffff, C_register_[send_register_index], send_thread_id);   
+        uint32_t c23_ = __shfl_sync(0xffffffff, C_register_[send_register_index] + 4, send_thread_id);
+        
+        half (&c01)[2] = reinterpret_cast<half(&)[2]>(c01_);
+        half (&c23)[2] = reinterpret_cast<half(&)[2]>(c23_);
+        
+        acc_register_[mma_m][mma_n][0] = acc_register_[mma_m][mma_n][0] * alpha_ + c01[0];
+        acc_register_[mma_m][mma_n][1] = acc_register_[mma_m][mma_n][1] * alpha_ + c01[1];
+        acc_register_[mma_m][mma_n][2] = acc_register_[mma_m][mma_n][2] * alpha_ + c23[0];
+        acc_register_[mma_m][mma_n][3] = acc_register_[mma_m][mma_n][3] * alpha_ + c23[1];
       }
   }
 
