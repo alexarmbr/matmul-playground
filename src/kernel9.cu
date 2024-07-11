@@ -209,7 +209,6 @@ kernel_9(half* A,
 
   // calculate how many bits of shared memory indices are going to be swizzled, and create masks
   constexpr unsigned int SWIZZLE_BITS_B = int_log2(BN_dim / 8);
-  constexpr unsigned int SWIZZLE_MASK_B = 0b1110000 << SWIZZLE_BITS_B;
 
   // loop bounds, constexpr where possible allows for loop unrolling
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;
@@ -346,51 +345,59 @@ kernel_9(half* A,
   half beta_ = (half)beta;
 
   float4 C_register[16];
-  unsigned int (&C_register_) [64] = reinterpret_cast<unsigned int(&)[64]>(C_register);
+  half (&C_register_) [16][4] = reinterpret_cast<half(&)[16][4]>(C_register);
   
   // calculate pointers for this warps C and D tiles
   half* C_block_gmem = C + (block_m * BM_dim * CD_stride) + (block_n * BN_dim);
   half* C_warp_gmem = C_block_gmem + (warp_m * WM_dim * CD_stride) + (warp_n * WN_dim);
   half* D_block_gmem = D + (block_m * BM_dim * CD_stride) + (block_n * BN_dim);
-  half* D_warp_gmem = D_block_gmem + (warp_m * WM_dim * CD_stride) + (warp_n * WN_dim);
-  
   half* acc_warp_smem = shmem + (warp_m * WM_dim * BN_dim) + (warp_n * WN_dim);
-  
   
   tileMemcpyLoad<WM_dim, WN_dim, 32, 16>(C_warp_gmem, C_register, N);
   __syncthreads();
-  stmatrix_m16n8_swizzle<BM_dim, BN_dim, mma_tiles_per_warp_m, mma_tiles_per_warp_n>(acc_register_, shmem);
 
   // since main loop is now over, we can write our accumulator values to shared memory
-  // this enables us to write results to shared memory in an efficient/vectorized striped
-  // access pattern. Each thread individually writing its MMA tiles directly to gmem
-  // would result in bad coalescing
-  
+  // enables more efficient access pattern when we write final results back to gmem
+  stmatrix_m16n8_swizzle<BM_dim, BN_dim, mma_tiles_per_warp_m, mma_tiles_per_warp_n>(acc_register_, acc_warp_smem);
 
+  {
+    constexpr unsigned int TILE_ROWS = BM_dim; // 256
+    constexpr unsigned int TILE_COLS_VECTORIZED = BN_dim / 8; // 16
 
-  // for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-  // {
-  //     for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-  //     {
-  //       half* C_mma_tile = C_warp_gmem + (mma_m * MMA_M_dim * CD_stride) + (mma_n * MMA_N_dim);
-  //       ldmatrix_m16n8_gmem(C_mma_tile, C_register[mma_m][mma_n], N * sizeof(half));
-          
-  //       // scale C by beta
-  //       acc_register_[mma_m][mma_n][0] = acc_register_[mma_m][mma_n][0] * alpha_ + C_register[mma_m][mma_n][0] * beta_;
-  //       acc_register_[mma_m][mma_n][1] = acc_register_[mma_m][mma_n][1] * alpha_ + C_register[mma_m][mma_n][1] * beta_;
-  //       acc_register_[mma_m][mma_n][2] = acc_register_[mma_m][mma_n][2] * alpha_ + C_register[mma_m][mma_n][2] * beta_;
-  //       acc_register_[mma_m][mma_n][3] = acc_register_[mma_m][mma_n][3] * alpha_ + C_register[mma_m][mma_n][3] * beta_;
-  //     }
-  // }
+    const unsigned int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_VECTORIZED;
+    constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
+    unsigned int thread_row = thread_idx / TILE_COLS_VECTORIZED;
+    const unsigned int thread_col = thread_idx % TILE_COLS_VECTORIZED;
+    static_assert(NUM_ITERS == 16);
 
-  // for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
-  // {
-  //     for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
-  //     {
-  //       half* D_mma_tile = D_warp_gmem + (mma_m * MMA_M_dim * CD_stride) + (mma_n * MMA_N_dim);
-  //       stmatrix_m16n8(D_mma_tile, acc_register_[mma_m][mma_n], N * sizeof(half));
-  //     }
-  // }
+    float4* C_blocktile_smem = reinterpret_cast<float4*>(shmem);
+    float4* D_blocktile_gmem = reinterpret_cast<float4*>(D_block_gmem);
+    const unsigned int CD_stride_vectorized = CD_stride / 8;
+
+    #pragma unroll
+    for (unsigned int i = 0; i < NUM_ITERS; i++)
+    {
+      const unsigned int src_index = thread_row * TILE_COLS_VECTORIZED + thread_col;
+      const unsigned int dst_index = thread_row * CD_stride_vectorized + thread_col;
+      // const unsigned int src_index_swizzled = src_index ^ ((src_index & 0b111000) >> 3);
+      
+      float4 acc = C_blocktile_smem[src_index];
+      half (&acc_) [8] = reinterpret_cast<half(&)[8]>(acc);
+      half D[8];
+      D[0] = acc_[0] * alpha_ + beta_ * C_register_[i][0];
+      D[1] = acc_[1] * alpha_ + beta_ * C_register_[i][1];
+      D[2] = acc_[2] * alpha_ + beta_ * C_register_[i][2];
+      D[3] = acc_[3] * alpha_ + beta_ * C_register_[i][3];
+      D[4] = acc_[4] * alpha_ + beta_ * C_register_[i][4];
+      D[5] = acc_[5] * alpha_ + beta_ * C_register_[i][5];
+      D[6] = acc_[6] * alpha_ + beta_ * C_register_[i][6];
+      D[7] = acc_[7] * alpha_ + beta_ * C_register_[i][7];
+      float4 D_ = reinterpret_cast<float4&>(D);
+      D_blocktile_gmem[dst_index] = D_;
+      thread_row += ROW_STEP;
+    }
+  }
 }
 
 void kernel_9_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)

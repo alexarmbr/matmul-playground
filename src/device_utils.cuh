@@ -487,7 +487,6 @@ __device__ __forceinline__ void stmatrix_m16n8(
     dst_ptr[fragment_row * dst_stride_bytes + fragment_col] = reg_[1];
 }
 
-
 // loads an MMA tile directly from global memory
 // this is innefficient, access pattern results in bad coalescing
 __device__ __forceinline__ void ldmatrix_m16n8_gmem(
@@ -508,7 +507,6 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
     fragment_row += 8;
     reg_[1] = src_ptr[fragment_row * src_stride_bytes + fragment_col];
 }
-
 
 // this is more efficient, stores data in a swizzled
 // pattern to shared memory
@@ -538,81 +536,15 @@ __device__ __forceinline__ void stmatrix_m16n8_swizzle(
         #pragma unroll
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
-            // byte offset to the top left of the mma tile
+            // offset in units of int32 to the top left of the mma tile within the BM by BN block tile
             const unsigned int mma_tile_offset = ((mma_m * MMA_M_dim * BN_dim_) + (mma_n * MMA_N_dim));
-            const unsigned int thread_offset = mma_tile_offset + (thread_row * BN_dim) + thread_col;
-            const unsigned int swizzled_thread_offset = thread_offset ^ ((thread_offset & 0b11100000) >> 3);
-            dst_[swizzled_thread_offset] = src_[mma_m][mma_n][0];
-            dst_[swizzled_thread_offset + MMA_M_dim * BN_dim_] = src_[mma_m][mma_n][1];
+            const unsigned int thread_offset = mma_tile_offset + (thread_row * BN_dim_) + thread_col;
+            // const unsigned int swizzled_thread_offset = thread_offset ^ ((thread_offset & 0b11100000) >> 3);
+            dst_[thread_offset] = src_[mma_m][mma_n][0];
+            dst_[thread_offset + MMA_M_dim * BN_dim_] = src_[mma_m][mma_n][1];
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// template <unsigned int BM_dim, unsigned int BK_dim>
-// __device__ void tileMemcpySwizzleUnrolled_A(half* src, half* dst, const unsigned int src_stride_half)
-// {
-//     float4* src_float4 = reinterpret_cast<float4*>(src);
-//     float4* dst_float4 = reinterpret_cast<float4*>(dst);
-//     int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-//     int num_threads = blockDim.x * blockDim.y;
-//     constexpr unsigned int BK_dim_float4 = BK_dim / 8;
-//     constexpr unsigned int TILE_SIZE = BM_dim * BK_dim_float4;
-//     const unsigned int src_stride_float4 = src_stride_half / 8;
-
-
-//     #pragma unroll 8
-//     while (thread_idx < TILE_SIZE)
-//     {
-//         const unsigned int thread_idx_y = thread_idx / BK_dim_float4;
-//         const unsigned int thread_idx_x = thread_idx % BK_dim_float4;
-//         const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
-//         unsigned int dst_ind = thread_idx_y * BK_dim_float4 + thread_idx_x;
-//         dst_ind = dst_ind ^ ((dst_ind & 0b10000) >> 4);
-//         dst_ind = dst_ind ^ ((dst_ind & 0b1100) >> 2);
-//         dst_float4[dst_ind] = src_float4[src_ind];
-//         thread_idx += num_threads;
-//     }
-// }
-
-// template <unsigned int BK_dim, unsigned int BN_dim>
-// __device__ void tileMemcpySwizzleUnrolled_B(half* src, half* dst, const unsigned int src_stride_half)
-// {
-//     float4* src_float4 = reinterpret_cast<float4*>(src);
-//     float4* dst_float4 = reinterpret_cast<float4*>(dst);
-//     int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-//     int num_threads = blockDim.x * blockDim.y;
-//     constexpr unsigned int BN_dim_float4 = BN_dim / 8;
-//     constexpr unsigned int TILE_SIZE = BK_dim * BN_dim_float4;
-//     const unsigned int src_stride_float4 = src_stride_half / 8;
-
-//     #pragma unroll 8
-//     while (thread_idx < TILE_SIZE)
-//     {
-//         const unsigned int thread_idx_y = thread_idx / BN_dim_float4;
-//         const unsigned int thread_idx_x = thread_idx % BN_dim_float4;
-//         const unsigned int src_ind = thread_idx_y * src_stride_float4 + thread_idx_x;
-//         unsigned int dst_ind = thread_idx_y * BN_dim_float4 + thread_idx_x;
-//         dst_ind = dst_ind ^ ((dst_ind & 0b1110000) >> 4);
-//         dst_float4[dst_ind] = src_float4[src_ind];
-//         thread_idx += num_threads;
-//     }
-// }
-
 
 // useful functions
 constexpr unsigned int int_log2(unsigned int x)
