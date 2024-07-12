@@ -15,7 +15,7 @@
     // void cublas_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs);
 
   int main(int argc, char **argv) {
-    bool check_on_cpu = false;
+    bool check_on_cpu = true;
     
     if (argc != 3) {
         std::cerr << "Usage: " << argv[0] << " <kernel_id> <num_iterations>" << std::endl;
@@ -28,16 +28,18 @@
     assert(num_iterations > 0);
 
     KernelLogger timer(timer_name);
-    // const unsigned int M = 256;
-    // const unsigned int N = 256;
-    // const unsigned int K = 256;
-    const unsigned int M = 4096;
-    const unsigned int N = 4096;
-    const unsigned int K = 4096;
+    const unsigned int M = 256;
+    const unsigned int N = 256;
+    const unsigned int K = 256;
+    // const unsigned int M = 4096;
+    // const unsigned int N = 4096;
+    // const unsigned int K = 4096;
     
     auto [device_sgemm_params, host_sgemm_params] = sgemm_setup(M, N, K);
-    // device_sgemm_params.alpha = 0.0;
-    // host_sgemm_params.alpha = 0.0;
+    device_sgemm_params.alpha = 0.0;
+    host_sgemm_params.alpha = 0.0;
+    device_sgemm_params.beta = 1.0;
+    host_sgemm_params.beta = 1.0;
     switch (kernel_id) {
         // case 1:
         //     kernel_1_launch(device_sgemm_params, timer, num_iterations);

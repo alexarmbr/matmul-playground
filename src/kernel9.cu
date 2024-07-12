@@ -349,7 +349,7 @@ kernel_9(half* A,
   half* D_block_gmem = D + (block_m * BM_dim * CD_stride) + (block_n * BN_dim);
   half* acc_warp_smem = shmem + (warp_m * WM_dim * BN_dim) + (warp_n * WN_dim);
   
-  tileMemcpyLoad<WM_dim, WN_dim, 32, 16>(C_warp_gmem, C_register, N);
+  tileMemcpyLoadWarp<WM_dim, WN_dim, 32, 16>(C_warp_gmem, C_register, N);
   __syncthreads();
 
   // since main loop is now over, we can write our accumulator values to shared memory
@@ -380,7 +380,9 @@ kernel_9(half* A,
       
       float4 acc = C_blocktile_smem[src_index];
       half (&acc_) [8] = reinterpret_cast<half(&)[8]>(acc);
-      half D[8];
+      // half D[8];
+      float4 D_;
+      half (&D) [8] = reinterpret_cast<half(&)[8]>(D_);
       D[0] = acc_[0] * alpha_ + beta_ * C_register_[i][0];
       D[1] = acc_[1] * alpha_ + beta_ * C_register_[i][1];
       D[2] = acc_[2] * alpha_ + beta_ * C_register_[i][2];
@@ -389,7 +391,7 @@ kernel_9(half* A,
       D[5] = acc_[5] * alpha_ + beta_ * C_register_[i][5];
       D[6] = acc_[6] * alpha_ + beta_ * C_register_[i][6];
       D[7] = acc_[7] * alpha_ + beta_ * C_register_[i][7];
-      float4 D_ = reinterpret_cast<float4&>(D);
+      // float4 D_ = reinterpret_cast<float4&>(D);
       D_blocktile_gmem[dst_index] = D_;
       thread_row += ROW_STEP;
     }
