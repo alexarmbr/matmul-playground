@@ -224,13 +224,9 @@ kernel_9(half* A,
   
   // double buffering
   extern __shared__ half shmem[];
-  // half* A_block_smem[2] = {shmem, &shmem[BM_dim * BK_dim]};
-  // half* B_block_smem[2] = {&shmem[2 * BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
-  // half* A_block_smem[2] = {shmem, &shmem[BM_dim * BK_dim + BK_dim * BN_dim]};
-  // half* B_block_smem[2] = {&shmem[BM_dim * BK_dim], &shmem[2 * BM_dim * BK_dim + BK_dim * BN_dim]};
   half* A_block_smem = shmem;
   half* B_block_smem = &shmem[BM_dim * BK_dim];
-  constexpr unsigned int BUFFER_SIZE = BM_dim * BK_dim + BK_dim * BN_dim;
+  constexpr int BUFFER_SIZE = BM_dim * BK_dim + BK_dim * BN_dim;
 
   // declare register storage
   // ptx instructions expect uint32_t registers, where each uint32_t is 2 halfs packed together  
@@ -329,11 +325,11 @@ kernel_9(half* A,
 
     if (block_k != num_block_tiles_k)
     {
-      A_block_smem = (A_block_smem + offset_direction * BUFFER_SIZE);
-      B_block_smem = (B_block_smem + offset_direction * BUFFER_SIZE);
-      offset_direction = -offset_direction;
-      tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem);
+      A_block_smem = A_block_smem + BUFFER_SIZE * offset_direction;
+      B_block_smem = B_block_smem + BUFFER_SIZE * offset_direction;
+      offset_direction = -1 * offset_direction;
       tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 2>(B_gmem_cache_reg, B_block_smem);
+      tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem);
     }
   }
 

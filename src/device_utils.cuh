@@ -248,7 +248,7 @@ template<unsigned int TILE_ROWS,
 unsigned int TILE_COLS,
 unsigned int NUM_THREADS,
 unsigned int ELEMENTS_PER_THREAD>
-__device__ __forceinline__ void tileMemcpyLoad(
+__device__ __forceinline__ void tileMemcpyLoadWarp(
     half* src,
     float4 dst_reg[ELEMENTS_PER_THREAD],
     const unsigned int src_stride
