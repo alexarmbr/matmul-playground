@@ -241,6 +241,55 @@ __device__ __forceinline__ void tileMemcpyLoad(
 }
 
 
+// same as above, performs only a load into registers, not the store into shared memory
+// this one is meant for warp by warp use in the epilogue of kernel 9, each warp loads
+// its warp tile into memory
+template<unsigned int TILE_ROWS,
+unsigned int TILE_COLS,
+unsigned int NUM_THREADS,
+unsigned int ELEMENTS_PER_THREAD>
+__device__ __forceinline__ void tileMemcpyLoad(
+    half* src,
+    float4 dst_reg[ELEMENTS_PER_THREAD],
+    const unsigned int src_stride
+)
+{
+    // reinterpret input/output as float4
+    float4* src_float4 = reinterpret_cast<float4*>(src);
+    const unsigned int src_stride_vectorized = src_stride / 8;
+
+    // # of threads is multiple of # of columns in the tile
+    constexpr unsigned int TILE_COLS_VECTORIZED = TILE_COLS / 8;
+    static_assert(NUM_THREADS % TILE_COLS_VECTORIZED == 0);
+    
+    // flatten out 2d grid of threads into in order of increasing threadIdx.x
+    const unsigned int thread_idx = threadIdx.x % 32;
+
+    // assign each thread a row/column in the tile, calculate how many iterations we need
+    // to cover the whole tile
+    constexpr unsigned int ROW_STEP = NUM_THREADS / TILE_COLS_VECTORIZED;
+    constexpr unsigned int NUM_ITERS = TILE_ROWS / ROW_STEP;
+    unsigned int thread_row = thread_idx / TILE_COLS_VECTORIZED;
+    const unsigned int thread_col = thread_idx % TILE_COLS_VECTORIZED;
+    
+    // compile time check that we provided the right amount of registers for storage
+    static_assert(ELEMENTS_PER_THREAD == NUM_ITERS);
+    
+    #pragma unroll
+    for (unsigned int i = 0; i < NUM_ITERS; i++)
+    {
+        const unsigned int src_index = thread_row * src_stride_vectorized + thread_col;
+        dst_reg[i] = src_float4[src_index];
+        thread_row += ROW_STEP;
+    }
+}
+
+
+
+
+
+
+
 template<unsigned int TILE_ROWS,
 unsigned int TILE_COLS,
 unsigned int NUM_THREADS,
