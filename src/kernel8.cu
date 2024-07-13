@@ -208,7 +208,6 @@ kernel_8(half* A,
 
   // calculate how many bits of shared memory indices are going to be swizzled, and create masks
   constexpr unsigned int SWIZZLE_BITS_B = int_log2(BN_dim / 8);
-  constexpr unsigned int SWIZZLE_MASK_B = 0b1110000 << SWIZZLE_BITS_B;
 
   // loop bounds, constexpr where possible allows for loop unrolling
   constexpr unsigned int mma_tiles_per_warp_k = WK_dim / MMA_K_dim;

@@ -206,7 +206,7 @@ unsigned int NUM_THREADS,
 unsigned int ELEMENTS_PER_THREAD>
 __device__ __forceinline__ void tileMemcpyLoad(
     half* src,
-    float4 dst_reg[ELEMENTS_PER_THREAD],
+    float4 (&dst_reg)[ELEMENTS_PER_THREAD],
     const unsigned int src_stride
 )
 {
@@ -250,7 +250,7 @@ unsigned int NUM_THREADS,
 unsigned int ELEMENTS_PER_THREAD>
 __device__ __forceinline__ void tileMemcpyLoadWarp(
     half* src,
-    float4 dst_reg[ELEMENTS_PER_THREAD],
+    float4 (&dst_reg)[ELEMENTS_PER_THREAD],
     const unsigned int src_stride
 )
 {
@@ -278,10 +278,33 @@ __device__ __forceinline__ void tileMemcpyLoadWarp(
     #pragma unroll
     for (unsigned int i = 0; i < NUM_ITERS; i++)
     {
+
         const unsigned int src_index = thread_row * src_stride_vectorized + thread_col;
         dst_reg[i] = src_float4[src_index];
+        // if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
+        // {
+        //     half * dst_reg_ = reinterpret_cast<half*>(&(dst_reg[i]));
+        //     printf("thread row = %d, thread col = %d, src index = %d, C_register = %f\n", thread_row, thread_col, src_index, __half2float(*dst_reg_));
+        // }
         thread_row += ROW_STEP;
+
     }
+
+    // if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0) {
+    //     half (&dst_reg_)[ELEMENTS_PER_THREAD][8] = reinterpret_cast<half(&)[ELEMENTS_PER_THREAD][8]>(dst_reg);
+    //     for (unsigned int i = 0; i < ELEMENTS_PER_THREAD; i++)
+    //     {
+    //         const unsigned int src_index = i * src_stride;
+    //         for (unsigned int j = 0; j < 8; j++)
+    //         {
+    //             printf("dst_reg[%d][%d] = %f\n", i, j, __half2float(dst_reg_[i][j]));
+    //             printf("gmem[%d] = %f\n", src_index + j, __half2float(src[src_index + j]));
+    //         }
+    //     }
+
+    // }
+
+
 }
 
 
@@ -569,7 +592,7 @@ __device__ __forceinline__ void stmatrix_m16n8_swizzle(
 )
 {
     constexpr unsigned int MMA_M_dim = 8;
-    constexpr unsigned int MMA_N_dim = 4;
+    constexpr unsigned int MMA_N_dim = 8 / 2;
     
     constexpr unsigned int BN_dim_ = BN_dim / 2;
     uint32_t (&src_)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2]>(src);

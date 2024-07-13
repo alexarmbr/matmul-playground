@@ -56,16 +56,18 @@ std::pair<sgemm_params, sgemm_params> sgemm_setup(unsigned int M, unsigned int N
     srand(1234);
     for (int i = 0; i < M * N; i++) {
       // C[i] = RAND_HALF();
-      C[i] = (half) i;
+      // C[i] = (half) i;
+      C[i] = 0.0f;
     }
     for (int i = 0; i < K * N; i++)
     {
-      B[i] = RAND_HALF();
+      // B[i] = RAND_HALF();
+      B[i] = (half) 1.0;
     }
     for (int i = 0; i < M * K; i++)
     {
-      A[i] = RAND_HALF();
-      // A[i] = (half) i;
+      // A[i] = RAND_HALF();
+      A[i] = (half)((0.1f * (float) i) / 256.0f);
     }
     
     // copy to device
