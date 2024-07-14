@@ -582,8 +582,8 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
 
 // this is more efficient, stores data in a swizzled
 // pattern to shared memory
-template <unsigned int BM_dim,
-unsigned int BN_dim,
+template <
+unsigned int dst_stride_bytes,
 unsigned int mma_tiles_per_warp_m,
 unsigned int mma_tiles_per_warp_n>
 __device__ __forceinline__ void stmatrix_m16n8_swizzle(
@@ -592,9 +592,9 @@ __device__ __forceinline__ void stmatrix_m16n8_swizzle(
 )
 {
     constexpr unsigned int MMA_M_dim = 8;
-    constexpr unsigned int MMA_N_dim = 8 / 2;
+    constexpr unsigned int MMA_N_dim = 8 / (sizeof(uint32_t) / sizeof(half));
     
-    constexpr unsigned int BN_dim_ = BN_dim / 2;
+    constexpr unsigned int dst_stride = dst_stride_bytes / sizeof(uint32_t);
     uint32_t (&src_)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2]>(src);
     uint32_t* dst_ = reinterpret_cast<uint32_t*>(dst);
     
@@ -603,14 +603,14 @@ __device__ __forceinline__ void stmatrix_m16n8_swizzle(
     const unsigned int thread_col = warp_thread_id % 4;
     
     #pragma unroll
-    for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+    for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m * 2; mma_m++)
     {
         #pragma unroll
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
             // offset in units of int32 to the top left of the mma tile within the BM by BN block tile
-            const unsigned int mma_tile_offset = ((mma_m * MMA_M_dim * BN_dim_) + (mma_n * MMA_N_dim));
-            const unsigned int thread_offset = mma_tile_offset + (thread_row * BN_dim_) + thread_col;
+            const unsigned int mma_tile_offset = ((mma_m * MMA_M_dim * dst_stride) + (mma_n * MMA_N_dim));
+            const unsigned int thread_offset = mma_tile_offset + (thread_row * dst_stride) + thread_col;
             // const unsigned int swizzled_thread_offset = thread_offset ^ ((thread_offset & 0b11100000) >> 3);
             dst_[thread_offset] = src_[mma_m][mma_n][0];
             dst_[thread_offset + MMA_M_dim * BN_dim_] = src_[mma_m][mma_n][1];
