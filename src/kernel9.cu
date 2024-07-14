@@ -266,17 +266,8 @@ kernel_9(half* A,
   half* B_block_gmem = B + (block_n * BN_dim);
   tileMemcpySwizzleA<BM_dim, NUM_THREADS>(A_block_gmem, A_block_smem, K);
   tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem, N);
-  // __syncthreads();
 
   // construct const pointers to warp tiles for use inside the inner loop
-
-  // const half* A_warp_tile[2] = {A_block_smem[0] + (warp_m * WM_dim * BK_dim), A_block_smem[1] + (warp_m * WM_dim * BK_dim)};
-  // const half* B_warp_tile[2] = {B_block_smem[0] + (warp_n * WN_dim), B_block_smem[1] + (warp_n * WN_dim)};
-  // const uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
-  // const uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
-  // const uint32_t A_warp_tile_byte_offset[2] = {cvta_to_shared_u32(A_smem_[0] + (warp_m * WM_dim) * BK_dim), cvta_to_shared_u32(A_smem_[1] + (warp_m * WM_dim) * BK_dim)};
-  // const uint32_t B_warp_tile_byte_offset[2] = {cvta_to_shared_u32(B_smem_[0] + (warp_n * WN_dim)), cvta_to_shared_u32(B_smem_[1] + (warp_n * WN_dim))};
-
   int offset_direction = 1;
 
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
@@ -355,12 +346,13 @@ kernel_9(half* A,
 
   // since main loop is now over, we can write our accumulator values to shared memory
   // enables more efficient access pattern when we write final results back to gmem
-  stmatrix_m16n8_swizzle<BM_dim, BN_dim, mma_tiles_per_warp_m, mma_tiles_per_warp_n>(acc_register_, acc_warp_smem);
+  stmatrix_m16n8_swizzle<BN_dim * sizeof(half), mma_tiles_per_warp_m, mma_tiles_per_warp_n, MMA_M_dim, MMA_N_dim>(acc_register_, acc_warp_smem);
 
   {
     constexpr unsigned int WARP_SIZE = 32;
-    constexpr unsigned int TILE_ROWS = WM_dim; // 256
-    constexpr unsigned int TILE_COLS_VECTORIZED = WN_dim / 8; // 16
+    constexpr unsigned int TILE_ROWS = WM_dim; // 64
+    constexpr unsigned int TILE_COLS_VECTORIZED = WN_dim / 8; // 8
+    constexpr unsigned int SRC_STRIDE_VECTORIZED = BN_dim / 8;
 
     const unsigned int thread_idx = threadIdx.x % 32;
     constexpr unsigned int ROW_STEP = WARP_SIZE / TILE_COLS_VECTORIZED;
@@ -376,19 +368,12 @@ kernel_9(half* A,
     #pragma unroll
     for (unsigned int i = 0; i < NUM_ITERS; i++)
     {
-
-
-      const unsigned int src_index = thread_row * TILE_COLS_VECTORIZED + thread_col;
+      const unsigned int src_index = thread_row * SRC_STRIDE_VECTORIZED + thread_col;
       const unsigned int dst_index = thread_row * CD_stride_vectorized + thread_col;
-      // if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
-      // {
-      //     printf("thread row = %d, thread col = %d, dst index = %d, C_register = %f\n", thread_row, thread_col, dst_index, __half2float(C_register_[i][0]));
-      // }
-      // const unsigned int src_index_swizzled = src_index ^ ((src_index & 0b111000) >> 3);
+      const unsigned int src_index_swizzled = src_index ^ ((src_index & 0b111000) >> 3);
       
-      float4 acc = acc_warp_smem_[src_index];
+      float4 acc = acc_warp_smem_[src_index_swizzled];
       half (&acc_) [8] = reinterpret_cast<half(&)[8]>(acc);
-      // half D[8];
       float4 D_;
       half (&D) [8] = reinterpret_cast<half(&)[8]>(D_);
       D[0] = acc_[0] * alpha_ + beta_ * C_register_[i][0];
@@ -399,7 +384,6 @@ kernel_9(half* A,
       D[5] = acc_[5] * alpha_ + beta_ * C_register_[i][5];
       D[6] = acc_[6] * alpha_ + beta_ * C_register_[i][6];
       D[7] = acc_[7] * alpha_ + beta_ * C_register_[i][7];
-      // float4 D_ = reinterpret_cast<float4&>(D);
       D_warp_gmem_[dst_index] = D_;
       thread_row += ROW_STEP;
     }

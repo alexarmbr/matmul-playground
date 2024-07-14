@@ -281,30 +281,8 @@ __device__ __forceinline__ void tileMemcpyLoadWarp(
 
         const unsigned int src_index = thread_row * src_stride_vectorized + thread_col;
         dst_reg[i] = src_float4[src_index];
-        // if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
-        // {
-        //     half * dst_reg_ = reinterpret_cast<half*>(&(dst_reg[i]));
-        //     printf("thread row = %d, thread col = %d, src index = %d, C_register = %f\n", thread_row, thread_col, src_index, __half2float(*dst_reg_));
-        // }
         thread_row += ROW_STEP;
-
     }
-
-    // if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0) {
-    //     half (&dst_reg_)[ELEMENTS_PER_THREAD][8] = reinterpret_cast<half(&)[ELEMENTS_PER_THREAD][8]>(dst_reg);
-    //     for (unsigned int i = 0; i < ELEMENTS_PER_THREAD; i++)
-    //     {
-    //         const unsigned int src_index = i * src_stride;
-    //         for (unsigned int j = 0; j < 8; j++)
-    //         {
-    //             printf("dst_reg[%d][%d] = %f\n", i, j, __half2float(dst_reg_[i][j]));
-    //             printf("gmem[%d] = %f\n", src_index + j, __half2float(src[src_index + j]));
-    //         }
-    //     }
-
-    // }
-
-
 }
 
 
@@ -585,37 +563,39 @@ __device__ __forceinline__ void ldmatrix_m16n8_gmem(
 template <
 unsigned int dst_stride_bytes,
 unsigned int mma_tiles_per_warp_m,
-unsigned int mma_tiles_per_warp_n>
+unsigned int mma_tiles_per_warp_n,
+unsigned int MMA_M_dim,
+unsigned int MMA_N_dim>
 __device__ __forceinline__ void stmatrix_m16n8_swizzle(
     half (&src)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][4],
     half* dst
 )
 {
-    constexpr unsigned int MMA_M_dim = 8;
-    constexpr unsigned int MMA_N_dim = 8 / (sizeof(uint32_t) / sizeof(half));
-    
-    constexpr unsigned int dst_stride = dst_stride_bytes / sizeof(uint32_t);
+    constexpr unsigned int dst_stride_int32 = dst_stride_bytes / sizeof(uint32_t);
+    constexpr unsigned int mma_tile_stride_int32 = MMA_N_dim / 2;
+
     uint32_t (&src_)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2]>(src);
     uint32_t* dst_ = reinterpret_cast<uint32_t*>(dst);
-    
+
     const unsigned int warp_thread_id = threadIdx.x % 32;
     const unsigned int thread_row = warp_thread_id / 4;
     const unsigned int thread_col = warp_thread_id % 4;
-    
+
     #pragma unroll
-    for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m * 2; mma_m++)
+    for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
     {
         #pragma unroll
         for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
         {
             // offset in units of int32 to the top left of the mma tile within the BM by BN block tile
-            const unsigned int mma_tile_offset = ((mma_m * MMA_M_dim * dst_stride) + (mma_n * MMA_N_dim));
-            const unsigned int thread_offset = mma_tile_offset + (thread_row * dst_stride) + thread_col;
-            // const unsigned int swizzled_thread_offset = thread_offset ^ ((thread_offset & 0b11100000) >> 3);
-            dst_[thread_offset] = src_[mma_m][mma_n][0];
-            dst_[thread_offset + MMA_M_dim * BN_dim_] = src_[mma_m][mma_n][1];
+            const unsigned int mma_tile_offset = ((mma_m * MMA_M_dim * dst_stride_int32) + (mma_n * mma_tile_stride_int32));
+            const unsigned int thread_offset = mma_tile_offset + (thread_row * dst_stride_int32) + thread_col;
+            const unsigned int swizzled_thread_offset = thread_offset ^ ((thread_offset & 0b11100000) >> 3);
+            dst_[swizzled_thread_offset] = src_[mma_m][mma_n][0];
+            dst_[swizzled_thread_offset + 8 * dst_stride_int32] = src_[mma_m][mma_n][1];
         }
     }
+
 }
 
 // useful functions
@@ -628,3 +608,45 @@ constexpr unsigned int int_log2(unsigned int x)
     }
     return result;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// constexpr unsigned int dst_stride_int32 = dst_stride_bytes / sizeof(uint32_t);
+// constexpr unsigned int mma_tile_stride_int32 = MMA_N_dim / 2;
+
+// uint32_t (&src_)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_n][2]>(src);
+// uint32_t* dst_ = reinterpret_cast<uint32_t*>(dst);
+
+// const unsigned int warp_thread_id = threadIdx.x % 32;
+// const unsigned int thread_row = warp_thread_id / 4;
+// const unsigned int thread_col = warp_thread_id % 4;
+
+// #pragma unroll
+// for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
+// {
+//     #pragma unroll
+//     for (unsigned int mma_n = 0; mma_n < mma_tiles_per_warp_n; mma_n++)
+//     {
+//         // offset in units of int32 to the top left of the mma tile within the BM by BN block tile
+//         const unsigned int mma_tile_offset = ((mma_m * MMA_M_dim * dst_stride_int32) + (mma_n * mma_tile_stride_int32));
+//         const unsigned int thread_offset = mma_tile_offset + (thread_row * dst_stride_int32) + thread_col;
+//         // const unsigned int swizzled_thread_offset = thread_offset ^ ((thread_offset & 0b11100000) >> 3);
+//         dst_[thread_offset] = src_[mma_m][mma_n][0];
+//         // dst_[thread_offset + 8 * dst_stride_int32] = src_[mma_m][mma_n][1];
+//     }
+// }
