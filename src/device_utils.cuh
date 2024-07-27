@@ -595,7 +595,6 @@ __device__ __forceinline__ void stmatrix_m16n8_swizzle(
             dst_[swizzled_thread_offset + 8 * dst_stride_int32] = src_[mma_m][mma_n][1];
         }
     }
-
 }
 
 // useful functions

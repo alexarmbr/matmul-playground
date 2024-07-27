@@ -341,11 +341,13 @@ kernel_9(half* A,
   half* D_warp_gmem = D_block_gmem + (warp_m * WM_dim * CD_stride) + (warp_n * WN_dim);
   half* acc_warp_smem = shmem + (warp_m * WM_dim * BN_dim) + (warp_n * WN_dim);
   
+  // each warp loads its tile of C from global memory into registers in a coalesced pattern
   tileMemcpyLoadWarp<WM_dim, WN_dim, 32, 16>(C_warp_gmem, C_register, N);
   __syncthreads();
 
-  // since main loop is now over, we can write our accumulator values to shared memory
-  // enables more efficient access pattern when we write final results back to gmem
+  // write accumulated A*B back to shmem, we write to shmem first because the layout of accumulator values accross threads would make writing
+  // them directly to global memory inefficient because of bad coalescing. It is more efficient to first write accumulator values to shared memory
+  // and then read them from shared memory with a thread layout that permits a coalesced write of D to global memory.
   stmatrix_m16n8_swizzle<BN_dim * sizeof(half), mma_tiles_per_warp_m, mma_tiles_per_warp_n, MMA_M_dim, MMA_N_dim>(acc_register_, acc_warp_smem);
 
   {
