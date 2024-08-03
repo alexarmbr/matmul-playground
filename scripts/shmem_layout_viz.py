@@ -1,5 +1,3 @@
-ROWS = 32
-COLS = 4
 from enum import Enum
 from copy import deepcopy
 
@@ -106,58 +104,57 @@ class Array:
     swizzled_array = deepcopy(self)
     for row in range(self.rows):
       for col in range(self.cols):
-        swizzled_row, swizzled_col = swizzle_func(row, col)
+        swizzled_row, swizzled_col = swizzle_func(row, col, self.cols)
         swizzled_array.array[swizzled_row][swizzled_col] = self.array[row][col]
     return swizzled_array
 
-def SWIZZLE_A_shmem(row, col):
+def SWIZZLE_A(row, col, STRIDE):
   """
   swizzle function applied to A in shared memory
   swizzle is computed WRT to indices of the packed/vectorized elements
   i.e. float4/int rather than half
   """
-  i = row * COLS + col
+  i = row * STRIDE + col
   swizzled_i = i ^ ((i & 0b10000) >> 4)
   swizzled_i = swizzled_i ^ ((swizzled_i & 0b1100) >> 2)
-  swizzled_row = swizzled_i // COLS
-  swizzled_col = swizzled_i % COLS
+  swizzled_row = swizzled_i // STRIDE
+  swizzled_col = swizzled_i % STRIDE
   return swizzled_row, swizzled_col
 
 
-def SWIZZLE_C(row, col):
+def SWIZZLE_C(row, col, STRIDE):
   """
   swizzle function applied to C in shared memory
   swizzle is computed WRT to indices of the packed/vectorized elements
   i.e. float4/int rather than half
   """
-  i = row * COLS + col
+  i = row * STRIDE + col
   swizzled_i = i ^ ((i & 0b1110000) >> 3)
-  swizzled_row = swizzled_i // COLS
-  swizzled_col = swizzled_i % COLS
+  swizzled_row = swizzled_i // STRIDE
+  swizzled_col = swizzled_i % STRIDE
   return swizzled_row, swizzled_col
+
+def SWIZZLE_B(row, col, STRIDE):
+  i = row * STRIDE + col
+  swizzled_i = i ^ ((i & 0b11100000) >> 5)
+  swizzled_row = swizzled_i // STRIDE
+  swizzled_col = swizzled_i % STRIDE
+  return swizzled_row, swizzled_col
+
 
 if __name__ == "__main__":
 
   # block tile dimensions for kernel 9
-  BM = 256
-  BN = 128
-  BK = 32
+  # BM = 256
+  BN = 256
+  BK = 8
   
   # pattern of swizzled elements repeats every 8 rows, so we only need to look at the first 8 rows
-  ROWS = 8
-  A_shmem = Array(ROWS, BK, dtype.FLOAT4)
-  print(A_shmem)
-  A_shmem.count_bank_conflicts()
-  print("-" * 8)
-  print("swizzled array: ")
-  A_swizzled = A_shmem.swizzle_array(SWIZZLE_A_shmem)
-  print(A_swizzled)
-  A_swizzled.count_bank_conflicts()
+  # ROWS = 8
+  B_shmem = Array(BK, BN, dtype.FLOAT4)
+  print(B_shmem)
+  B_shmem_swizzled = B_shmem.swizzle_array(SWIZZLE_B)
+  print("SWIZZLED: ")
+  print(B_shmem_swizzled)
 
-  MMA_M = 16
-  MMA_N = 8
-  C_shmem = Array(MMA_M, MMA_N, dtype.INT)
-  print(C_shmem)
-  C_swizzled = C_shmem.swizzle_array(SWIZZLE_C)
-  print(C_swizzled)
 

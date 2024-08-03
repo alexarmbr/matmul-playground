@@ -299,6 +299,17 @@ kernel_9(half* A,
         #pragma unroll
         for (unsigned int mma_m = 0; mma_m < mma_tiles_per_warp_m; mma_m++)
         {
+          // asm volatile (
+          //   "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
+          //   "{%0, %1}, "
+          //   "{%2, %3}, "
+          //   "{%4}, "
+          //   "{%5, %6};"
+          //   : "=r"(acc_register[mma_m][mma_n][0]), "=r"(acc_register[mma_m][mma_n][1])
+          //   : "r"(A_register[mma_m][mma_k][0]), "r"(A_register[mma_m][mma_k][1]),
+          //     "r"(B_register[mma_k][mma_n])
+          //     "r"(acc_register[mma_m][mma_n][0]), "r"(acc_register[mma_m][mma_n][1])
+          // );
           asm volatile (
             "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 "
             "{%0, %1}, "
