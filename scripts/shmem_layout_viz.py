@@ -158,13 +158,19 @@ if __name__ == "__main__":
   print(B_shmem_swizzled)
 
 
+  stride = B_shmem.cols
   for i_ in range(8):
-    i = i_ * BN
-    i = i ^ ((i & 0b11100000) >> 5)
+    i = i_ * stride + 1
+    s_i = i ^ ((i & 0b11100000) >> 5)
+    s_i ^= 0b100
     # swizzled_index = index
-    row = i // BN
-    col = i % BN
-    print(B_shmem_swizzled.array[row][col])
 
+    row = i // stride
+    col = i % stride
+
+    s_row = s_i // stride
+    s_col = s_i % stride
+
+    print(f"unswizzled: {B_shmem.array[row][col]}  swizzled: {B_shmem_swizzled.array[s_row][s_col]}")    
 
 
