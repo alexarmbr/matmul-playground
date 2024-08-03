@@ -167,7 +167,7 @@ __device__ __forceinline__ void ldmatrix_b(
   
   uint32_t (&reg_) [4][8] = reinterpret_cast<uint32_t(&)[4][8]>(reg);
   const unsigned int logical_offset = ((threadIdx.x % 8) * smem_stride) +  (((threadIdx.x % 32) / 8) * 8);
-  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b11100000000) >> 8);
+  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b11100000000) >> 5);
   uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
   constexpr unsigned int smem_stride_ = smem_stride * sizeof(half); // convert stride to bytes
 
@@ -182,7 +182,7 @@ __device__ __forceinline__ void ldmatrix_b(
     "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
     "{%0, %1, %2, %3}, [%4];"
     : "=r"(reg_[0][4]), "=r"(reg_[0][5]), "=r"(reg_[0][6]), "=r"(reg_[0][7])
-    : "r"(src_addr ^ 0b100000)
+    : "r"(src_addr ^ 0b1000000)
   );
 
   src_addr += 8 * smem_stride_;
@@ -198,7 +198,7 @@ __device__ __forceinline__ void ldmatrix_b(
     "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
     "{%0, %1, %2, %3}, [%4];"
     : "=r"(reg_[1][4]), "=r"(reg_[1][5]), "=r"(reg_[1][6]), "=r"(reg_[1][7])
-    : "r"(src_addr ^ 0b100000)
+    : "r"(src_addr ^ 0b1000000)
   );
 
   src_addr += 8 * smem_stride_;
@@ -214,7 +214,7 @@ __device__ __forceinline__ void ldmatrix_b(
     "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
     "{%0, %1, %2, %3}, [%4];"
     : "=r"(reg_[2][4]), "=r"(reg_[2][5]), "=r"(reg_[2][6]), "=r"(reg_[2][7])
-    : "r"(src_addr ^ 0b100000)
+    : "r"(src_addr ^ 0b1000000)
   );
 
   src_addr += 8 * smem_stride_;
@@ -230,7 +230,7 @@ __device__ __forceinline__ void ldmatrix_b(
     "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
     "{%0, %1, %2, %3}, [%4];"
     : "=r"(reg_[3][4]), "=r"(reg_[3][5]), "=r"(reg_[3][6]), "=r"(reg_[3][7])
-    : "r"(src_addr ^ 0b100000)
+    : "r"(src_addr ^ 0b1000000)
   );
 
 }
@@ -326,20 +326,6 @@ kernel_7(half* A,
   const half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
   const uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
   const uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
-
-  // print if thread 0 block 0
-  // if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0)
-  // {
-  //   printf("mma tiles per warp m: %d\n", mma_tiles_per_warp_m);
-  //   printf("mma tiles per warp n: %d\n", mma_tiles_per_warp_n);
-  //   printf("mma tiles per warp k: %d\n", mma_tiles_per_warp_k);
-  //   printf("BM: %d\n", BM_dim);
-  //   printf("BN: %d\n", BN_dim);
-  //   printf("BK: %d\n", BK_dim);
-  //   printf("WM: %d\n", WM_dim);
-  //   printf("WN: %d\n", WN_dim);
-  //   printf("WK: %d\n", WK_dim);
-  // }
 
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
