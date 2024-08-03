@@ -4,6 +4,7 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
+// double buffering
 
 template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k, unsigned int smem_stride>
 __device__ __forceinline__ void ldmatrix_a(
@@ -244,7 +245,7 @@ unsigned int WN_dim,
 unsigned int WK_dim,
 unsigned int NUM_THREADS>
 __global__ void
-kernel_7(half* A,
+kernel_6(half* A,
   half* B,
   half* C,
   half* D,
@@ -256,7 +257,6 @@ kernel_7(half* A,
 {
   constexpr unsigned int MMA_M_dim = 16;
   constexpr unsigned int MMA_N_dim = 8;
-  constexpr unsigned int MMA_K_dim = 8;
 
   // for convenience/readability in index calculations
   const unsigned int A_stride = K;
@@ -278,9 +278,11 @@ kernel_7(half* A,
   const unsigned int warp_m = threadIdx.y;
   const unsigned int warp_n = threadIdx.x / 32;
   
+  // double buffering
   extern __shared__ half shmem[];
   half* A_block_smem = shmem;
   half* B_block_smem = &shmem[BM_dim * BK_dim];
+  constexpr int BUFFER_SIZE = BM_dim * BK_dim + BK_dim * BN_dim;
 
   // declare register storage
   // ptx instructions expect uint32_t registers, where each uint32_t is 2 halfs packed together  
@@ -322,10 +324,9 @@ kernel_7(half* A,
   tileMemcpySwizzle<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B>(B_block_gmem, B_block_smem, N);
 
   // construct const pointers to warp tiles for use inside the inner loop
-  const half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
-  const half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
-  const uint32_t A_warp_tile_byte_offset = cvta_to_shared_u32(A_warp_tile);
-  const uint32_t B_warp_tile_byte_offset = cvta_to_shared_u32(B_warp_tile);
+
+
+  int offset_direction = 1;
 
   for (unsigned int block_k = 1; block_k <= num_block_tiles_k; block_k++)
   {
@@ -338,6 +339,8 @@ kernel_7(half* A,
       tileMemcpyLoad<BM_dim, BK_dim, NUM_THREADS, 4>(A_block_gmem, A_gmem_cache_reg, K);
       tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 4>(B_block_gmem, B_gmem_cache_reg, N);
     }
+    half* A_warp_tile = A_block_smem + (warp_m * WM_dim * BK_dim);
+    half* B_warp_tile = B_block_smem + (warp_n * WN_dim);
 
     ldmatrix_a<mma_tiles_per_warp_m, mma_tiles_per_warp_k, BK_dim>(A_warp_tile, A_register_);
     ldmatrix_b<mma_tiles_per_warp_k, mma_tiles_per_warp_n, BN_dim>(B_warp_tile, B_register_);
@@ -368,10 +371,13 @@ kernel_7(half* A,
     }
 
 
-    __syncthreads();
-
     if (block_k != num_block_tiles_k)
     {
+      // switch smem buffers each iteration
+      A_block_smem = A_block_smem + BUFFER_SIZE * offset_direction;
+      B_block_smem = B_block_smem + BUFFER_SIZE * offset_direction;
+      offset_direction = -1 * offset_direction;
+
       tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem);
       tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 4>(B_gmem_cache_reg, B_block_smem);
     }
@@ -415,7 +421,7 @@ kernel_7(half* A,
   }
 }
 
-void kernel_7_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
+void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
 {
     
   constexpr unsigned int BM_dim = 256;
@@ -447,19 +453,19 @@ void kernel_7_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     constexpr unsigned int ThreadsM = WARPS_PER_BLOCK_M;
     constexpr unsigned int ThreadsN = WARP_SIZE * WARPS_PER_BLOCK_N;
     constexpr unsigned int NumThreads = ThreadsM * ThreadsN;
-    const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+    const unsigned int shmem_bytes = (BM_dim * BK_dim + BK_dim * BN_dim) * 2 * sizeof(half);
 
     dim3 gridDim(BlocksN, BlocksM);
     dim3 blockDim(ThreadsN, ThreadsM);
     
-    CUDA_CHECK(cudaFuncSetAttribute(kernel_7<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, NumThreads>,
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_6<BM_dim, BN_dim, BK_dim, WM_dim, WN_dim, WK_dim, NumThreads>,
     cudaFuncAttributeMaxDynamicSharedMemorySize,
     65536)); // set shared memory limit to 64KB which is maximum for sm_75
 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        kernel_7
+        kernel_6
         <BM_dim, BN_dim, BK_dim,
         WM_dim, WN_dim, WK_dim, NumThreads>
         <<<gridDim, blockDim, shmem_bytes>>>(
