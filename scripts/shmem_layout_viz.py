@@ -158,3 +158,13 @@ if __name__ == "__main__":
   print(B_shmem_swizzled)
 
 
+  for i_ in range(8):
+    i = i_ * BN
+    i = i ^ ((i & 0b11100000) >> 5)
+    # swizzled_index = index
+    row = i // BN
+    col = i % BN
+    print(B_shmem_swizzled.array[row][col])
+
+
+
