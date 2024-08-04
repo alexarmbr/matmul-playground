@@ -4,239 +4,6 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
-// double buffering
-
-template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k, unsigned int smem_stride>
-__device__ __forceinline__ void ldmatrix_a(
-  const half* src,
-  half (&reg)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][4]
-)
-{
-  static_assert(mma_tiles_per_warp_m == 8, "mma_tiles_per_warp_m must be 4");
-  static_assert(mma_tiles_per_warp_k == 4, "mma_tiles_per_warp_k must be 4");
-
-  uint32_t (&reg_) [mma_tiles_per_warp_m][mma_tiles_per_warp_k][2] = reinterpret_cast<uint32_t(&)[mma_tiles_per_warp_m][mma_tiles_per_warp_k][2]>(reg);
-  unsigned int logical_offset = (threadIdx.x % 32) * smem_stride;
-  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b10000000) >> 4);
-  swizzled_offset = swizzled_offset ^ ((swizzled_offset & 0b1100000) >> 2);
-  uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
-  constexpr unsigned int smem_stride_ = smem_stride * sizeof(half); // convert stride to bytes
-    
-    // 0
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][0][0]), "=r"(reg_[0][0][1]), "=r"(reg_[1][0][0]), "=r"(reg_[1][0][1])
-      : "r"(src_addr)
-    );
-
-    // 0
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][0][0]), "=r"(reg_[2][0][1]), "=r"(reg_[3][0][0]), "=r"(reg_[3][0][1])
-      : "r"(src_addr + 32 * smem_stride_)
-    );
-
-    // 0
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][0][0]), "=r"(reg_[4][0][1]), "=r"(reg_[5][0][0]), "=r"(reg_[5][0][1])
-      : "r"(src_addr + 64 * smem_stride_)
-    );
-
-    // 0
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[6][0][0]), "=r"(reg_[6][0][1]), "=r"(reg_[7][0][0]), "=r"(reg_[7][0][1])
-      : "r"(src_addr + 96 * smem_stride_)
-    );
-
-    src_addr ^= 0b10000;
-    
-    // 1
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][1][0]), "=r"(reg_[0][1][1]), "=r"(reg_[1][1][0]), "=r"(reg_[1][1][1])
-      : "r"(src_addr)
-    );
-
-    // 1
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][1][0]), "=r"(reg_[2][1][1]), "=r"(reg_[3][1][0]), "=r"(reg_[3][1][1])
-      : "r"(src_addr + 32 * smem_stride_)
-    );
-
-    // 1
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][1][0]), "=r"(reg_[4][1][1]), "=r"(reg_[5][1][0]), "=r"(reg_[5][1][1])
-      : "r"(src_addr + 64 * smem_stride_)
-    );
-
-    // 1
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[6][1][0]), "=r"(reg_[6][1][1]), "=r"(reg_[7][1][0]), "=r"(reg_[7][1][1])
-      : "r"(src_addr + 96 * smem_stride_)
-    );
-    
-    src_addr ^= 0b110000;
-
-    // 2
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][2][0]), "=r"(reg_[0][2][1]), "=r"(reg_[1][2][0]), "=r"(reg_[1][2][1])
-      : "r"(src_addr)
-    );
-
-    // 2
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][2][0]), "=r"(reg_[2][2][1]), "=r"(reg_[3][2][0]), "=r"(reg_[3][2][1])
-      : "r"(src_addr + 32 * smem_stride_)
-    );
-
-    // 2
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][2][0]), "=r"(reg_[4][2][1]), "=r"(reg_[5][2][0]), "=r"(reg_[5][2][1])
-      : "r"(src_addr + 64 * smem_stride_)
-    );
-
-    // 2
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[6][2][0]), "=r"(reg_[6][2][1]), "=r"(reg_[7][2][0]), "=r"(reg_[7][2][1])
-      : "r"(src_addr + 96 * smem_stride_)
-    );
-    src_addr ^= 0b10000;
-
-    // 3
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[0][3][0]), "=r"(reg_[0][3][1]), "=r"(reg_[1][3][0]), "=r"(reg_[1][3][1])
-      : "r"(src_addr)
-    );
-
-    // 3
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[2][3][0]), "=r"(reg_[2][3][1]), "=r"(reg_[3][3][0]), "=r"(reg_[3][3][1])
-      : "r"(src_addr + 32 * smem_stride_)
-    );
-
-    // 3
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[4][3][0]), "=r"(reg_[4][3][1]), "=r"(reg_[5][3][0]), "=r"(reg_[5][3][1])
-      : "r"(src_addr + 64 * smem_stride_)
-    );
-
-    // 3
-    asm volatile (
-      "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
-      "{%0, %1, %2, %3}, [%4];"
-      : "=r"(reg_[6][3][0]), "=r"(reg_[6][3][1]), "=r"(reg_[7][3][0]), "=r"(reg_[7][3][1])
-      : "r"(src_addr + 96 * smem_stride_)
-    );
-
-}
-
-template <unsigned int mma_tiles_per_warp_k, unsigned int mma_tiles_per_warp_n, unsigned int smem_stride>
-__device__ __forceinline__ void ldmatrix_b(
-  const half* src,
-  half (&reg)[mma_tiles_per_warp_k][mma_tiles_per_warp_n][2]
-)
-{
-  static_assert(mma_tiles_per_warp_k == 4, "mma_tiles_per_warp_k must be 4");
-  static_assert(mma_tiles_per_warp_n == 8, "mma_tiles_per_warp_n must be 8");
-  
-  uint32_t (&reg_) [4][8] = reinterpret_cast<uint32_t(&)[4][8]>(reg);
-  const unsigned int logical_offset = ((threadIdx.x % 8) * smem_stride) +  (((threadIdx.x % 32) / 8) * 8);
-  unsigned int swizzled_offset = logical_offset ^ ((logical_offset & 0b11100000000) >> 5);
-  uint32_t src_addr = cvta_to_shared_u32(src + swizzled_offset);
-  constexpr unsigned int smem_stride_ = smem_stride * sizeof(half); // convert stride to bytes
-
-  asm volatile (
-    "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-    "{%0, %1, %2, %3}, [%4];"
-    : "=r"(reg_[0][0]), "=r"(reg_[0][1]), "=r"(reg_[0][2]), "=r"(reg_[0][3])
-    : "r"(src_addr)
-  );
-
-  asm volatile (
-    "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-    "{%0, %1, %2, %3}, [%4];"
-    : "=r"(reg_[0][4]), "=r"(reg_[0][5]), "=r"(reg_[0][6]), "=r"(reg_[0][7])
-    : "r"(src_addr ^ 0b1000000)
-  );
-
-  src_addr += 8 * smem_stride_;
-
-  asm volatile (
-    "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-    "{%0, %1, %2, %3}, [%4];"
-    : "=r"(reg_[1][0]), "=r"(reg_[1][1]), "=r"(reg_[1][2]), "=r"(reg_[1][3])
-    : "r"(src_addr)
-  );
-
-  asm volatile (
-    "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-    "{%0, %1, %2, %3}, [%4];"
-    : "=r"(reg_[1][4]), "=r"(reg_[1][5]), "=r"(reg_[1][6]), "=r"(reg_[1][7])
-    : "r"(src_addr ^ 0b1000000)
-  );
-
-  src_addr += 8 * smem_stride_;
-
-  asm volatile (
-    "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-    "{%0, %1, %2, %3}, [%4];"
-    : "=r"(reg_[2][0]), "=r"(reg_[2][1]), "=r"(reg_[2][2]), "=r"(reg_[2][3])
-    : "r"(src_addr)
-  );
-
-  asm volatile (
-    "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-    "{%0, %1, %2, %3}, [%4];"
-    : "=r"(reg_[2][4]), "=r"(reg_[2][5]), "=r"(reg_[2][6]), "=r"(reg_[2][7])
-    : "r"(src_addr ^ 0b1000000)
-  );
-
-  src_addr += 8 * smem_stride_;
-
-  asm volatile (
-    "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-    "{%0, %1, %2, %3}, [%4];"
-    : "=r"(reg_[3][0]), "=r"(reg_[3][1]), "=r"(reg_[3][2]), "=r"(reg_[3][3])
-    : "r"(src_addr)
-  );
-
-  asm volatile (
-    "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
-    "{%0, %1, %2, %3}, [%4];"
-    : "=r"(reg_[3][4]), "=r"(reg_[3][5]), "=r"(reg_[3][6]), "=r"(reg_[3][7])
-    : "r"(src_addr ^ 0b1000000)
-  );
-
-}
-
-
 template <unsigned int BM_dim,
 unsigned int BN_dim,
 unsigned int BK_dim,
@@ -282,7 +49,8 @@ kernel_7(half* A,
   extern __shared__ half shmem[];
   half* A_block_smem = shmem;
   half* B_block_smem = &shmem[BM_dim * BK_dim];
-  constexpr int BUFFER_SIZE = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+  // constexpr int BUFFER_SIZE = (BM_dim * BK_dim + BK_dim * BN_dim) * sizeof(half);
+  constexpr int BUFFER_SIZE = (BM_dim * BK_dim + BK_dim * BN_dim);
 
   // declare register storage
   // ptx instructions expect uint32_t registers, where each uint32_t is 2 halfs packed together  
@@ -331,12 +99,13 @@ kernel_7(half* A,
   unsigned int A_logical_offset = (threadIdx.x % 32) * BK_dim;
   unsigned int A_swizzled_offset = A_logical_offset ^ ((A_logical_offset & 0b10000000) >> 4);
   A_swizzled_offset = A_swizzled_offset ^ ((A_swizzled_offset & 0b1100000) >> 2);
-  uint32_t A_warp_smem = cvta_to_shared_u32(A_warp_tile + A_swizzled_offset);
+  int32_t A_warp_smem = cvta_to_shared_u32(A_warp_tile + A_swizzled_offset);
   constexpr unsigned int A_smem_stride_bytes = BK_dim * sizeof(half);
 
   const unsigned int B_logical_offset = ((threadIdx.x % 8) * BN_dim) +  (((threadIdx.x % 32) / 8) * 8);
   unsigned int B_swizzled_offset = B_logical_offset ^ ((B_logical_offset & 0b11100000000) >> 5);
-  uint32_t B_warp_smem = cvta_to_shared_u32(B_warp_tile + B_swizzled_offset);
+  int32_t B_warp_smem = cvta_to_shared_u32(B_warp_tile + B_swizzled_offset);
+  constexpr unsigned int B_smem_stride_bytes = BN_dim * sizeof(half);
 
   int offset_direction = 1;
 
@@ -352,7 +121,11 @@ kernel_7(half* A,
       tileMemcpyLoad<BK_dim, BN_dim, NUM_THREADS, 4>(B_block_gmem, B_gmem_cache_reg, N);
     }
 
-    // 0
+    ////////////////////////////
+    // load a tile from shmem //
+    ////////////////////////////
+
+    // k=0
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -360,7 +133,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem)
     );
 
-    // 0
+    // k=0
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -368,7 +141,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem + 32 * A_smem_stride_bytes)
     );
 
-    // 0
+    // k=0
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -376,7 +149,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem + 64 * A_smem_stride_bytes)
     );
 
-    // 0
+    // k=0
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -386,7 +159,7 @@ kernel_7(half* A,
 
     A_warp_smem ^= 0b10000;
     
-    // 1
+    // k=1
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -394,7 +167,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem)
     );
 
-    // 1
+    // k=1
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -402,7 +175,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem + 32 * A_smem_stride_bytes)
     );
 
-    // 1
+    // k=1
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -410,7 +183,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem + 64 * A_smem_stride_bytes)
     );
 
-    // 1
+    // k=1
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -420,7 +193,7 @@ kernel_7(half* A,
     
     A_warp_smem ^= 0b110000;
 
-    // 2
+    // k=2
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -428,7 +201,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem)
     );
 
-    // 2
+    // k=2
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -436,7 +209,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem + 32 * A_smem_stride_bytes)
     );
 
-    // 2
+    // k=2
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -444,7 +217,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem + 64 * A_smem_stride_bytes)
     );
 
-    // 2
+    // k=2
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -453,7 +226,7 @@ kernel_7(half* A,
     );
     A_warp_smem ^= 0b10000;
 
-    // 3
+    // k=3
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -461,7 +234,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem)
     );
 
-    // 3
+    // k=3
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -469,7 +242,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem + 32 * A_smem_stride_bytes)
     );
 
-    // 3
+    // k=3
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -477,7 +250,7 @@ kernel_7(half* A,
       : "r"(A_warp_smem + 64 * A_smem_stride_bytes)
     );
 
-    // 3
+    // k=3
     asm volatile (
       "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
       "{%0, %1, %2, %3}, [%4];"
@@ -487,7 +260,72 @@ kernel_7(half* A,
 
     A_warp_smem ^= 0b110000;
 
-    ldmatrix_b<mma_tiles_per_warp_k, mma_tiles_per_warp_n, BN_dim>(B_warp_tile, B_register_);
+    ////////////////////////////
+    // load b tile from shmem //
+    ////////////////////////////
+
+    int32_t B_warp_smem_ = B_warp_smem;
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(B_register[0][0]), "=r"(B_register[0][1]), "=r"(B_register[0][2]), "=r"(B_register[0][3])
+      : "r"(B_warp_smem)
+    );
+  
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(B_register[0][4]), "=r"(B_register[0][5]), "=r"(B_register[0][6]), "=r"(B_register[0][7])
+      : "r"(B_warp_smem ^ 0b1000000)
+    );
+
+    B_warp_smem_ += 8 * B_smem_stride_bytes;
+
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(B_register[1][0]), "=r"(B_register[1][1]), "=r"(B_register[1][2]), "=r"(B_register[1][3])
+      : "r"(B_warp_smem_)
+    );
+  
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(B_register[1][4]), "=r"(B_register[1][5]), "=r"(B_register[1][6]), "=r"(B_register[1][7])
+      : "r"(B_warp_smem_ ^ 0b1000000)
+    );
+  
+    B_warp_smem_ += 8 * B_smem_stride_bytes;
+
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(B_register[2][0]), "=r"(B_register[2][1]), "=r"(B_register[2][2]), "=r"(B_register[2][3])
+      : "r"(B_warp_smem_)
+    );
+  
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(B_register[2][4]), "=r"(B_register[2][5]), "=r"(B_register[2][6]), "=r"(B_register[2][7])
+      : "r"(B_warp_smem_ ^ 0b1000000)
+    );
+  
+    B_warp_smem_ += 8 * B_smem_stride_bytes;
+  
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(B_register[3][0]), "=r"(B_register[3][1]), "=r"(B_register[3][2]), "=r"(B_register[3][3])
+      : "r"(B_warp_smem_)
+    );
+  
+    asm volatile (
+      "ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 "
+      "{%0, %1, %2, %3}, [%4];"
+      : "=r"(B_register[3][4]), "=r"(B_register[3][5]), "=r"(B_register[3][6]), "=r"(B_register[3][7])
+      : "r"(B_warp_smem_ ^ 0b1000000)
+    );
     
     // outer product between mma tiles
     #pragma unroll
@@ -514,12 +352,13 @@ kernel_7(half* A,
       }
     }
 
-
     if (block_k != num_block_tiles_k)
     {
       // switch smem buffers each iteration
-      A_warp_smem = A_warp_smem + BUFFER_SIZE * offset_direction;
-      B_warp_smem = B_warp_smem + BUFFER_SIZE * offset_direction;
+      A_warp_smem = A_warp_smem + (BUFFER_SIZE * 2) * offset_direction;
+      A_block_smem = A_block_smem + BUFFER_SIZE * offset_direction;
+      B_warp_smem = B_warp_smem + (BUFFER_SIZE * 2) * offset_direction;
+      B_block_smem = B_block_smem + BUFFER_SIZE * offset_direction;
       offset_direction = -1 * offset_direction;
       tileMemcpySwizzleStoreA<BM_dim, NUM_THREADS, 4>(A_gmem_cache_reg, A_block_smem);
       tileMemcpySwizzleStore<BK_dim, BN_dim, NUM_THREADS, SWIZZLE_BITS_B, 4>(B_gmem_cache_reg, B_block_smem);
