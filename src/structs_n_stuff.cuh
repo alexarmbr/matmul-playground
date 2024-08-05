@@ -5,6 +5,8 @@
 #include <vector>
 #include <iostream>
 #include <numeric>
+#include <chrono>
+#include <thread>
 
 /**
  * Panic wrapper for unwinding CUDA runtime errors
@@ -76,6 +78,7 @@ struct KernelLogger
             cudaEventSynchronize(stop);
             cudaEventElapsedTime(&elapsed, start, stop);
             times.push_back(elapsed);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
       double logKernelStats(const unsigned int M, const unsigned int N, const unsigned int K)
       {
