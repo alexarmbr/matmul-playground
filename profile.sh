@@ -14,8 +14,6 @@ echo "Kernel 5"
 ./build/runner 5 50 1024 1024 1024
 echo "Kernel 6"
 ./build/runner 6 50 1024 1024 1024
-echo "Kernel 7"
-./build/runner 7 50 1024 1024 1024
 echo "cuBLAS HGEMM"
 ./build/runner 99 50 1024 1024 1024
 echo "------------------------------"
@@ -33,8 +31,6 @@ echo "Kernel 5"
 ./build/runner 5 50 2048 2048 2048
 echo "Kernel 6"
 ./build/runner 6 50 2048 2048 2048
-echo "Kernel 7"
-./build/runner 7 50 2048 2048 2048
 echo "cuBLAS HGEMM"
 ./build/runner 99 50 2048 2048 2048
 echo "------------------------------"
@@ -52,8 +48,6 @@ echo "Kernel 5"
 ./build/runner 5 50 4096 4096 4096
 echo "Kernel 6"
 ./build/runner 6 50 4096 4096 4096
-echo "Kernel 7"
-./build/runner 7 50 4096 4096 4096
 echo "cuBLAS HGEMM"
 ./build/runner 99 50 4096 4096 4096
 echo "------------------------------"
@@ -72,8 +66,6 @@ echo "Kernel 5"
 ./build/runner 5 50 8192 8192 8192
 echo "Kernel 6"
 ./build/runner 6 50 8192 8192 8192
-echo "Kernel 7"
-./build/runner 7 50 8192 8192 8192
 echo "cuBLAS HGEMM"
 ./build/runner 99 50 8192 8192 8192
 echo "------------------------------"
@@ -91,8 +83,6 @@ echo "Kernel 5"
 ./build/runner 5 50 16384 16384 16384
 echo "Kernel 6"
 ./build/runner 6 50 16384 16384 16384
-echo "Kernel 7"
-./build/runner 7 50 16384 16384 16384
 echo "cuBLAS HGEMM"
 ./build/runner 99 50 16384 16384 16384
 echo "------------------------------"

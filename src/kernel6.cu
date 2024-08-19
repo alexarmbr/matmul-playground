@@ -431,9 +431,6 @@ void kernel_6_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
   constexpr unsigned int WARPS_PER_BLOCK_M = 2;
   constexpr unsigned int WARPS_PER_BLOCK_N = 4;
   constexpr unsigned int WARPS_PER_BLOCK_K = 4;
-  // WM = 128
-  // WN = 64
-  // WK = 8
 
     constexpr unsigned int WM_dim = BM_dim / WARPS_PER_BLOCK_M;
     constexpr unsigned int WN_dim = BN_dim / WARPS_PER_BLOCK_N;

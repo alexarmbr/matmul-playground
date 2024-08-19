@@ -4,6 +4,7 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
+// shared memory swizzling
 
 template <unsigned int BM_dim,
 unsigned int BN_dim,

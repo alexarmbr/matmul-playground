@@ -34,7 +34,6 @@ void cublas_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const 
     for (int i = 0; i < num_runs; i++)
     {
         timer.Start();
-        // warmup
         cublasStatus_t status = cublasHgemm(handle,
             CUBLAS_OP_N,
             CUBLAS_OP_N,

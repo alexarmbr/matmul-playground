@@ -157,20 +157,20 @@ if __name__ == "__main__":
   print("SWIZZLED: ")
   print(B_shmem_swizzled)
 
-
   stride = B_shmem.cols
-  for i_ in range(8):
-    i = i_ * stride + 1
-    s_i = i ^ ((i & 0b11100000) >> 5)
-    s_i ^= 0b100
-    # swizzled_index = index
+  indices = [i * stride for i in range(8)]
+  indices = [i ^ ((i & 0b11100000) >> 5) for i in indices]
+  xor_patterns = [0b10, 0b110, 0b10, 0b110]
 
-    row = i // stride
-    col = i % stride
 
-    s_row = s_i // stride
-    s_col = s_i % stride
+  for j in range(4):
+    for i in indices:
+      s_row = i // stride
+      s_col = i % stride
+      print(f"swizzled: {B_shmem_swizzled.array[s_row][s_col]}")
+    print("--" * 10)
+    indices = [i ^ xor_patterns[j] for i in indices]
 
-    print(f"unswizzled: {B_shmem.array[row][col]}  swizzled: {B_shmem_swizzled.array[s_row][s_col]}")    
+
 
 

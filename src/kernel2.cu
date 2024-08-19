@@ -4,6 +4,7 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
+// optimized vectorized/unrolled global memory loads/stores
 
 template <unsigned int BM_dim,
 unsigned int BN_dim,

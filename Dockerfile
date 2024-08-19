@@ -7,13 +7,4 @@ RUN apt-get update && \
     echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null && \
     apt-get update
 
-RUN apt-get update && apt-get install -y cmake libgtest-dev git python3 python3-pip
-RUN pip install cuda-python
-RUN mkdir /tmp/cutlass && \
-    git clone https://github.com/NVIDIA/cutlass.git /tmp/cutlass && \
-    cd /tmp/cutlass && \
-    mkdir -p build && \
-    cd build && \
-    cmake .. -DCUTLASS_NVCC_ARCHS=75 -DCUTLASS_LIBRARY_KERNELS=gemm && \
-    make -j$(nproc) && \
-    make install
+RUN apt-get update && apt-get install -y cmake

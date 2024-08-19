@@ -4,7 +4,7 @@
 #include "device_utils.cuh"
 #include "structs_n_stuff.cuh"
 
-// small BK and WK dimensions
+// small BK and WK dimensions, optimized index calculations
 
 template <unsigned int mma_tiles_per_warp_m, unsigned int mma_tiles_per_warp_k, unsigned int smem_stride>
 __device__ __forceinline__ void ldmatrix_a(
