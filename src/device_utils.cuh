@@ -609,6 +609,30 @@ constexpr unsigned int int_log2(unsigned int x)
 }
 
 
+// only if we are compiling for sm_90 or above
+#if __CUDA_ARCH__ >= 900
+
+// TODO try this syntax
+// void wgmma_f16f32_64x256x16(float r[128], std::uint64_t a_descriptor, std::uint64_t b_descriptor) {
+// #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+//     asm volatile( //
+//         "wgmma.mma_async.sync.aligned.m64n256k16.f32.f16.f16 "
+//         "{%0}, %1, %2, "
+//         "1, 1, 1, 0, 0;"
+//         : "+f"(r[0])  // Using r[0] as a base register, with '+' to indicate it's both input and output
+//         : "l"(a_descriptor), "l"(b_descriptor));
+// #endif
+// }
+
+
+#endif
+
+
+
+
+
+
+
 
 
 
