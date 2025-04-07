@@ -1,0 +1,20 @@
+{
+    "name": "gemm-perf",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
+    "runArgs": [
+        "--gpus=all"
+    ],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+                "nvidia.nsight-vscode-edition",
+                "ms-azuretools.vscode-docker"
+            ]
+        }
+    }
+}

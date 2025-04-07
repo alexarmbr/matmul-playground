@@ -31,9 +31,6 @@ inline half RAND_HALF(float LO = -1.0f, float HI = 1.0f)
     return (half) r;
 }
 
-
-
-
 std::pair<sgemm_params, sgemm_params> sgemm_setup(unsigned int M, unsigned int N, unsigned int K, float alpha = 0.7, float beta = 0.3)
 {
     // setup
@@ -61,12 +58,12 @@ std::pair<sgemm_params, sgemm_params> sgemm_setup(unsigned int M, unsigned int N
     for (int i = 0; i < K * N; i++)
     {
       // B[i] = RAND_HALF();
-      B[i] = (half) 1.0;
+      B[i] = (half) 1.0f;
     }
     for (int i = 0; i < M * K; i++)
     {
       // A[i] = RAND_HALF();
-      A[i] = (half)((0.1f * (float) i) / 256.0f);
+      A[i] = (half) i;
     }
     
     // copy to device

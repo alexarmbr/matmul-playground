@@ -5,9 +5,38 @@
 
 #include "structs_n_stuff.cuh"
 
-__device__ __forceinline__ void wgmma_async_m64n256k16_f16_f16_f16_f16(float D[128], uint64_t A_desc, uint64_t B_desc){
+__device__ __forceinline__ uint64_t matrix_descriptor_encode(uint32_t x)
+{
+  return (x & 0x3FFFF) >> 4;
+}
+  
+
+__device__ __forceinline__ uint32_t cvta_to_shared_u32(const void *pointer) {
+    uint32_t address;
+    asm("{\n\t"
+        "  .reg .u64 u64addr;\n\t"
+        "  cvta.to.shared.u64 u64addr, %1;\n\t"
+        "  cvt.u32.u64 %0, u64addr;\n\t"
+        "}"
+        : "=r"(address)
+        : "l"(pointer));
+    return address;
+  }
+
+// https://docs.nvidia.com/cuda/parallel-thread-execution/#asynchronous-warpgroup-level-matrix-shared-memory-layout-matrix-descriptor
+template <unsigned int smem_width_bytes>
+__device__ uint64_t make_smem_descriptor(half* smem_ptr)
+{
+  uint64_t smem_desc = 0;
+  smem_desc |= matrix_descriptor_encode(cvta_to_shared_u32(smem_ptr));
+  smem_desc |= matrix_descriptor_encode(smem_width_bytes * 8) << 32; // offset in bytes between groups of 8 rows
+  smem_desc |= uint64_t(1) << 62; // 128B swizzle
+  return smem_desc;
+}
+
+__device__ __forceinline__ void wgmma_m64n256k16_f32_f16_f16(float D[128], uint64_t A_desc, uint64_t B_desc){
     asm volatile (
-        "wgmma.mma_async.sync.aligned.m64n256k16.f16.f16.f16 "
+        "wgmma.mma_async.sync.aligned.m64n256k16.f32.f16.f16 "
         "{%0, %1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13, %14, %15, "
         "%16, %17, %18, %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31,"
         "%32, %33, %34, %35, %36, %37, %38, %39, %40, %41, %42, %43, %44, %45, %46, %47,"
@@ -36,19 +65,19 @@ __device__ __forceinline__ void wgmma_async_m64n256k16_f16_f16_f16_f16(float D[1
             : "l"(A_desc), "l"(B_desc)
     );
 }
-#include <cuda_bf16.h>
 
 template <unsigned int SMEM_HEIGHT, unsigned int SMEM_WIDTH>
 void __createTensorMapHost(half* tensor_ptr, unsigned int gmem_height, unsigned int gmem_width, CUtensorMap* tensor_map)
 {
   constexpr uint32_t rank = 2;
-  uint64_t gmem_size[5] = {uint64_t(gmem_width), uint64_t(gmem_height), 1, 1, 1};
-  uint64_t gmem_stride[5] = {sizeof(half), sizeof(half) * gmem_width, 0, 0, 0};
-  uint32_t smem_size[5] = {uint32_t(SMEM_WIDTH), uint32_t(SMEM_HEIGHT), 1, 1, 1};
-  uint32_t smem_stride[5] = {1, 1, 1, 1, 1};
+  uint64_t gmem_size[2] = {uint64_t(gmem_width), uint64_t(gmem_height)};
+  uint64_t gmem_stride[1] = {sizeof(half) * gmem_width};
+  uint32_t smem_size[2] = {uint32_t(SMEM_WIDTH), uint32_t(SMEM_HEIGHT)};
+  uint32_t smem_stride[2] = {1, 1};
 
   // __nv_bfloat16* bf16_tensor_ptr = reinterpret_cast<__nv_bfloat16*>(tensor_ptr);
-
+  
+  // auto cuTensorMapEncodeTiled = get_cuTensorMapEncodeTiled();
   // Create the tensor descriptor.
   CUresult res = cuTensorMapEncodeTiled(
     tensor_map,                // CUtensorMap *tensorMap,
@@ -56,7 +85,7 @@ void __createTensorMapHost(half* tensor_ptr, unsigned int gmem_height, unsigned 
     rank,                       // cuuint32_t tensorRank,
     tensor_ptr,                 // void *globalAddress,
     gmem_size,                       // const cuuint64_t *globalDim,
-    gmem_stride + 1,                     // const cuuint64_t *globalStrides,
+    gmem_stride,                     // const cuuint64_t *globalStrides,
     smem_size,                   // const cuuint32_t *boxDim,
     smem_stride,                // const cuuint32_t *elementStrides,
     // Interleave patterns can be used to accelerate loading of values that
@@ -93,19 +122,21 @@ unsigned int BN_dim,
 unsigned int BK_dim>
 __global__ void
 kernel_7(
-  const CUtensorMap* tensorMapA,
-  const CUtensorMap* tensorMapB,
+  // const CUtensorMap* tensorMapA,
+  // const CUtensorMap* tensorMapB,
+  const __grid_constant__ CUtensorMap tensorMapA,
+  const __grid_constant__ CUtensorMap tensorMapB,
   half* C,
   half* D,
   const float alpha,
-  const float beta,
+  const float beta, 
   const unsigned int M,
   const unsigned int N,
   unsigned int K)
 {
 
-  alignas(128) half A_block_smem[BM_dim*BK_dim];
-  alignas(128) half B_block_smem[BK_dim*BN_dim];
+  __shared__ alignas(128) half A_block_smem[BM_dim*BK_dim];
+  __shared__ alignas(128) half B_block_smem[BK_dim*BN_dim];
   constexpr unsigned int ABlockNumBytes = BM_dim * BK_dim * sizeof(half);
   constexpr unsigned int BBlockNumBytes = BK_dim * BN_dim * sizeof(half);
 
@@ -128,6 +159,7 @@ kernel_7(
 
   if (threadIdx.x == 0) {
     
+    
     // initialize the barrier, since the entire thread block will wait on it,
     // the arrivall count argument is blockDim.x
     printf("arrival count is %d\n", blockDim.x);
@@ -146,10 +178,10 @@ kernel_7(
   cuda::barrier<cuda::thread_scope_block>::arrival_token tokenA, tokenB;
   if (threadIdx.x == 0){
     // printf("copying B\n");
-    cuda::device::experimental::cp_async_bulk_tensor_2d_global_to_shared(&A_block_smem[0], tensorMapA, 0, 0, barA);
+    cuda::device::experimental::cp_async_bulk_tensor_2d_global_to_shared(&A_block_smem, &tensorMapA, 0, 0, barA);
     tokenA = cuda::device::barrier_arrive_tx(barA, 1, ABlockNumBytes);
 
-    cuda::device::experimental::cp_async_bulk_tensor_2d_global_to_shared(&B_block_smem[0], tensorMapB, 0, 0, barB);
+    cuda::device::experimental::cp_async_bulk_tensor_2d_global_to_shared(&B_block_smem, &tensorMapB, 0, 0, barB);
     tokenB = cuda::device::barrier_arrive_tx(barB, 1, BBlockNumBytes);
     // printf("copying B done\n");
     // 0th thread arrives on the barrier
@@ -167,19 +199,31 @@ kernel_7(
 
   __syncthreads();
 
-  // printf("A_block_smem[0] is %f\n", A_block_smem[0]);
-  // printf("B_block_smem[0] is %f\n", B_block_smem[0]);    
 
+  uint64_t A_smem_desc = make_smem_descriptor<BK_dim * sizeof(half)>(A_block_smem);
+  uint64_t B_smem_desc = make_smem_descriptor<BK_dim * sizeof(half)>(B_block_smem);
 
-
-
+  float D_reg[128];
   
-  
-  
+  wgmma_m64n256k16_f32_f16_f16(D_reg, A_smem_desc, B_smem_desc);
+
+  if (threadIdx.x == 0){
+    printf("D_reg is %f %f\n", (float) D_reg[0], (float) D_reg[1]);
   }
 
-    
 
+  #define OUT_IDX(i, j) i * N + j
+
+  int thread = threadIdx.x % 128;
+  int row = thread / 4;
+  int col = thread % 4;
+  float* out = reinterpret_cast<float*>(D);
+
+  out[OUT_IDX(row, col)] = D_reg[0];
+  out[OUT_IDX(row, col)] = D_reg[1];
+
+}
+    
 
 
 void kernel_7_launch(sgemm_params device_sgemm_params, KernelLogger& timer, const unsigned int num_runs = 10)
@@ -195,17 +239,22 @@ void kernel_7_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
 
     constexpr unsigned int BM_dim = 64;
     constexpr unsigned int BN_dim = 256;
-    constexpr unsigned int BK_dim = 64;
+    constexpr unsigned int BK_dim = 16;
     constexpr unsigned int shmemNumBytes = BM_dim * BK_dim + BK_dim * BN_dim; 
 
 
-    CUtensorMap* tensorMapA = createTensorMap<BM_dim, BK_dim>(A_ptr, M, K);
-    CUtensorMap* tensorMapB = createTensorMap<BN_dim, BK_dim>(B_ptr, N, K);
+    // CUtensorMap* tensorMapA = createTensorMap<BM_dim, BK_dim>(A_ptr, M, K);
+    // CUtensorMap* tensorMapB = createTensorMap<BN_dim, BK_dim>(B_ptr, N, K);
+    CUtensorMap tensor_map_A{};
+    __createTensorMapHost<BM_dim, BK_dim>(A_ptr, M, K, &tensor_map_A);
 
-    
-    // CUDA_CHECK(cudaFuncSetAttribute(kernel_7<BM_dim, BN_dim, BK_dim>,
-    // cudaFuncAttributeMaxDynamicSharedMemorySize,
-    // shmemNumBytes * 2 * sizeof(half)));
+    CUtensorMap tensor_map_B{};
+    __createTensorMapHost<BN_dim, BK_dim>(B_ptr, N, K, &tensor_map_B);
+
+    // need to set this
+    CUDA_CHECK(cudaFuncSetAttribute(kernel_7<BM_dim, BN_dim, BK_dim>,
+    cudaFuncAttributeMaxDynamicSharedMemorySize,
+    shmemNumBytes * 2 * sizeof(half)));
 
     // dim3 gridDimension(device_sgemm_params.M / BM_dim, device_sgemm_params.N / BN_dim);
     dim3 gridDimension(1);
@@ -217,8 +266,8 @@ void kernel_7_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
         kernel_7
         <BM_dim, BN_dim, BK_dim>
         <<<gridDimension, blockDimension>>>(
-            tensorMapA,
-            tensorMapB,
+            tensor_map_A,
+            tensor_map_B,
             device_sgemm_params.C,
             device_sgemm_params.D,
             device_sgemm_params.alpha,
@@ -232,6 +281,21 @@ void kernel_7_launch(sgemm_params device_sgemm_params, KernelLogger& timer, cons
     double gflops_per_sec = timer.logKernelStats(M, N, K);
     std::cout << gflops_per_sec << " GFLOPS/sec for " << M << "x" << N << "x" << K << std::endl;
     CUDA_CHECK(cudaPeekAtLastError());
+
+
+
+    half* D_host = new half[M * N];
+    CUDA_CHECK(cudaMemcpy(D_host, D_ptr, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+
+
+    // print top left 16x16 tile of D
+    for (int i = 0; i < 16; i++){
+      for (int j = 0; j < 16; j++){
+        printf("%f ", (float) D_host[i * N + j]);
+      }
+      printf("\n");
+    }
+    
 }
 
 
